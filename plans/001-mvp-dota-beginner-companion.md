@@ -115,11 +115,19 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Com os eventos gravados reenviados ao aplicativo, a aba Herói mostra o herói escolhido com nome, atributo, tipo de ataque, funções e habilidades.
 - O botão "Partida encontrada" registra o evento como manual.
 
+**Verificações:**
+
+- Fixtures anonimizadas de duas partidas reais cobrem menu sem `map`, herói com `id: 0`, compras na estratégia sem itens visíveis, relógio que retrocede, inventário a partir do pré-jogo, nível de habilidade, item movido do stash e morte. A lista de eventos esperada foi escrita à mão e confere com a saída do normalizador e do `MatchTracker`.
+- O fim de partida é coberto por uma fixture sintética, identificada como tal.
+- O storage tem testes de gravação, leitura, expiração por TTL com dado vencido marcado como antigo, limpeza, reabertura, banco corrompido, pasta sem permissão e schema mais novo.
+- Com o log real (849 eventos) reenviado ao app aberto, todos foram aceitos. A aba Herói mostrou Zeus com atributo, ataque e funções dos dados embutidos, as habilidades com os níveis do GSI e a linha do tempo na ordem certa. O botão "Partida encontrada" registrou o evento como manual. A conferência foi feita pela acessibilidade (AT-SPI) e por captura de tela.
+
 **Em aberto:**
 
-- Fixtures precisam cobrir menu sem `map`, herói com `id: 0`, relógio que retrocede e inventário disponível somente a partir do pré-jogo. Lane e histórico de compras não podem ser tratados como dados confirmados.
 - Fonte verificável para posição (1 a 5) e dificuldade dos heróis.
 - Conferir a aba Herói e os eventos numa partida real contra bots, incluindo o fim da partida (`POST_GAME`, `win_team`), que não está no log disponível.
+- O escopo cita "cache e configurações" no SQLite. Só o cache foi implementado: a configuração continua no `config.toml` (com o token e permissão `0600`). Falta decidir se alguma configuração deve ir para o SQLite.
+- Marcar "Partida encontrada" reinicia a linha do tempo, como a detecção automática. Falta decidir se o clique manual deve só acrescentar o evento.
 
 ## Fase 3 — Providers e recomendações
 
@@ -197,3 +205,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fase 1: falhas antes ignoradas passam a ser tratadas. O `.env` é lido sem alterar o ambiente e impede a inicialização se for inválido; as tarefas do núcleo e o gravador de eventos informam interrupções; canais fechados geram 503 no servidor e aviso na interface; tradução e limpeza de temporários registram aviso no log.
 - 2026-10-24 — Fechamento da Fase 1: `setlocale` aprovado antes das threads, referências futuras removidas das abas e comentários, envio sintético por script e proteção da saída de pânicos. Achados relatados de partidas reais registrados com impactos nas Fases 2 e 4. Conferência visual e envio manual realizados; Fase 1 concluída, com a Fase 2 pendente de confirmação.
 - 2026-10-24 — Fase 2 marcada como atual. Decididos: dados dos heróis embutidos a partir do dotaconstants, posição e dificuldade fora da fase por falta de fonte, storage com `rusqlite` (`bundled`) e validação com o log reenviado ao app enquanto não há Dota no ambiente.
+- 2026-10-24 — Fase 2 implementada na branch `feat/phase-2-game-state-hero-storage`: normalizador do GSI, eventos de partida com origem, linha do tempo, "Partida encontrada" manual, aba Herói com dados embutidos do dotaconstants, cache em SQLite e ferramenta de reenvio do log. Aguardando revisão do mantenedor antes de marcar a fase como concluída.

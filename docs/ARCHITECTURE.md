@@ -25,15 +25,16 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 
 ## Camadas
 
-| Módulo           | Responsabilidade                                                                                                       | Pode depender de        |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `domain`         | Regras puras: formato KeyValues/VDF, conteúdo e validação do `.cfg` do GSI, instalação do Dota                         | nada do projeto         |
-| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso | `domain`                |
-| `gsi`            | Servidor GSI (Axum) e cliente do teste de conexão                                                                      | `domain`, `application` |
-| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos de configuração GSI, `config.toml`                | `domain`, `application` |
-| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                      | `domain`, `application` |
-| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                   | todos                   |
-| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                   | todos                   |
+| Módulo           | Responsabilidade                                                                                                        | Pode depender de        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, eventos de partida e catálogo de heróis | nada do projeto         |
+| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso  | `domain`                |
+| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                               | `domain`, `application` |
+| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos dos heróis    | `domain`, `application` |
+| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                        | `domain`, `application` |
+| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                       | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                    | todos                   |
+| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                    | todos                   |
 
 Regras:
 
@@ -43,25 +44,30 @@ Regras:
 
 ## Ports e adaptadores
 
-| Port (`application::ports`) | Adaptador                       | Função                                                        |
-| --------------------------- | ------------------------------- | ------------------------------------------------------------- |
-| `DotaLocator`               | `infrastructure::steam_locator` | Lista as bibliotecas Steam e as instalações do Dota 2         |
-| `ProcessProbe`              | `infrastructure::process`       | Informa se há processo `dota2` em `/proc/*/comm`              |
-| `ConfigFiles`               | `infrastructure::config_files`  | Lê, grava (de forma atômica) e faz backup dos arquivos `.cfg` |
-| `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                |
-| `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)     |
+| Port (`application::ports`) | Adaptador                       | Função                                                                  |
+| --------------------------- | ------------------------------- | ----------------------------------------------------------------------- |
+| `DotaLocator`               | `infrastructure::steam_locator` | Lista as bibliotecas Steam e as instalações do Dota 2                   |
+| `ProcessProbe`              | `infrastructure::process`       | Informa se há processo `dota2` em `/proc/*/comm`                        |
+| `ConfigFiles`               | `infrastructure::config_files`  | Lê, grava (de forma atômica) e faz backup dos arquivos `.cfg`           |
+| `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                          |
+| `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)               |
+| `CacheStore`                | `storage::sqlite_cache`         | Grava e lê o cache local; valores vencidos voltam marcados como antigos |
+
+O `CacheStore` ainda não é usado pelo núcleo: os dados que ele vai guardar vêm dos providers da Fase 3. Os dados dos heróis (`infrastructure::hero_data`) são um recorte do dotaconstants embutido no binário, com fonte e licença em `assets/dotaconstants/SOURCE.md`.
 
 Nos testes, os casos de uso recebem implementações falsas desses ports. Os testes unitários ficam em `tests/unit/` e os de integração em `tests/integration/`, conforme [TESTING.md](TESTING.md).
 
 ## Fluxo de eventos
 
 1. O Dota envia um POST JSON para `http://127.0.0.1:<porta>/`.
-2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha.
-3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus` e publica um novo `AppSnapshot`.
+2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha. Um evento aceito do Dota leva também o estado de jogo normalizado (`gsi::normalize`); cada campo é lido isoladamente, e um bloco vazio (`{}`) significa "sem dado".
+3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual e a linha do tempo da partida.
 4. A interface recebe cada `AppSnapshot` e atualiza as telas.
-5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão ou instalar a configuração GSI. O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
+5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI ou marcar "Partida encontrada". O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
 
-O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo.
+O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo, e não passam pelo `MatchTracker`.
+
+O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fases), guarda o que já aconteceu na partida para não repetir eventos quando a fase volta e marca cada evento como confirmado pelo GSI, inferido ou manual. Uma partida nova começa na seleção de heróis vinda do menu ou do fim de outra partida; itens que entram ou saem do inventário são sempre inferidos.
 
 ## Erros e diagnóstico
 
@@ -98,7 +104,7 @@ Decisões de arquitetura já aprovadas que ainda não existem no código. Quando
 
 | Camada          | Decisão                                                                                                                                                                                      |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`       | Persistência local em SQLite para cache, configurações e histórico de partidas                                                                                                               |
+| `storage`       | Configurações e histórico de partidas no SQLite (o cache já existe; ver acima)                                                                                                               |
 | `providers`     | A aplicação depende de uma interface de provider, não de uma API específica. Ordem de leitura: dado novo da API, depois cache vencido marcado como antigo, depois dados embutidos no binário |
 | `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                                      |
 | `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                                            |

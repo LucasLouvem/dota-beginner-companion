@@ -127,6 +127,8 @@ Regras de ligação e compilação:
 
 - O arquivo de produção mantém somente a declaração do módulo de testes com `#[cfg(test)]` e `#[path = "..."]`, apontando para o arquivo espelhado. O caminho é relativo à pasta do arquivo que declara o módulo e precisa ser um texto literal: o `#[path]` não aceita macros como `env!`.
 - Fixtures são lidas a partir da raiz do projeto, com `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/..."))`, para não depender da pasta do teste.
+- Os eventos do GSI em `tests/fixtures/gsi/` vêm de partidas reais anonimizadas, mais uma fixture sintética de fim de partida identificada como tal. O README da pasta descreve a origem de cada arquivo; nenhuma fixture pode ter dados pessoais. Os testes unitários as leem por `tests/support` (`fixture_payloads`), e os de integração pelo próprio arquivo.
+- Testes de sequência de eventos (`tests/integration/match_flow.rs`) comparam a saída com uma lista escrita à mão a partir da leitura da fixture, nunca gerada pelo próprio código testado.
 - O arquivo espelhado é um módulo filho e pode acessar itens privados do pai por `super`. Não torne funções públicas apenas para testá-las.
 - Corpos de testes, fakes e auxiliares ficam fora de `src/` e não entram no binário de produção.
 - O Cargo descobre arquivos `.rs` diretamente na raiz de `tests/` como executáveis independentes. Os arquivos nas subpastas precisam ser declarados pelos respectivos módulos ou pontos de entrada; movê-los sem registrar não executa os testes.

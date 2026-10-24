@@ -218,3 +218,25 @@ Todas as falhas aparecem como "Teste de conexão falhou". O status HTTP é class
 | Token recusado (HTTP 401)            | `CONNECTION_TEST_TOKEN_REJECTED`   | Verificar se `gsi_port` não está sendo usada por outro programa |
 | Conteúdo recusado (HTTP 400 ou 413)  | `CONNECTION_TEST_PAYLOAD_REJECTED` | Verificar se `gsi_port` não está sendo usada por outro programa |
 | Outro status HTTP ou falha ao enviar | `UNCLASSIFIED_ERROR`               | Consultar os detalhes técnicos                                  |
+
+### Banco local (`StorageError`)
+
+O adaptador `storage::sqlite_cache` classifica a falha pelo código que o SQLite informa. Um valor do cache com o prazo vencido não é erro: ele volta marcado como antigo.
+
+| Situação                                                                                  | Código                | Ação para o usuário                                   |
+| ----------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------- |
+| Sem permissão para abrir ou gravar o banco (`CannotOpen`, `PermissionDenied`, `ReadOnly`) | `STORAGE_UNAVAILABLE` | Verificar a permissão da pasta de dados do aplicativo |
+| Arquivo corrompido ou que não é SQLite (`DatabaseCorrupt`, `NotADatabase`)                | `STORAGE_CORRUPTED`   | Apagar o arquivo do banco; o aplicativo cria um novo  |
+| Banco criado por uma versão mais nova do aplicativo                                       | `UNCLASSIFIED_ERROR`  | Atualizar o aplicativo ou apagar o banco              |
+| Outra falha do SQLite                                                                     | `UNCLASSIFIED_ERROR`  | Consultar os detalhes técnicos                        |
+
+### Dados dos heróis (`HeroDataError`)
+
+| Situação                                              | Código               | Comportamento                                                                   |
+| ----------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------- |
+| O recorte embutido do dotaconstants não pode ser lido | `UNCLASSIFIED_ERROR` | Erro no log; a aba Herói mostra só o que o GSI informa                          |
+| Herói que o recorte não tem                           | —                    | A aba mostra o nome interno enviado pelo GSI e avisa que não há dados embutidos |
+
+### Reenvio do log GSI (`replay_gsi_log`)
+
+Ferramenta de desenvolvimento. Falhas ao ler a configuração usam os códigos da inicialização; falhas ao ler o arquivo do log ou ao iniciar o envio aparecem como `UNCLASSIFIED_ERROR`, com o título "Reenvio do log GSI falhou". O resumo final mostra só a contagem por resposta HTTP, nunca o conteúdo dos eventos.
