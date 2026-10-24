@@ -22,6 +22,10 @@ pub struct AppConfig {
     pub gsi_token: String,
     /// Bibliotecas Steam fora dos caminhos padrão.
     pub extra_libraries: Vec<PathBuf>,
+    /// Arquivo onde os eventos GSI do Dota são gravados. Só vem do ambiente,
+    /// nunca é salvo no `config.toml`.
+    #[serde(skip)]
+    pub gsi_log: Option<PathBuf>,
 }
 
 impl Default for AppConfig {
@@ -30,6 +34,7 @@ impl Default for AppConfig {
             gsi_port: DEFAULT_GSI_PORT,
             gsi_token: String::new(),
             extra_libraries: vec![PathBuf::from("/mnt/jogos/SteamLibrary")],
+            gsi_log: None,
         }
     }
 }
@@ -42,7 +47,7 @@ pub fn config_path() -> PathBuf {
 }
 
 /// Carrega o arquivo, gera o token se faltar e aplica as variáveis de ambiente
-/// `DOTA_COMPANION_GSI_PORT` e `DOTA_COMPANION_EXTRA_LIBRARIES` (separadas por `:`).
+/// (ver `apply_environment`).
 pub fn load_or_init(path: &Path) -> io::Result<AppConfig> {
     let mut config = match fs::read_to_string(path) {
         Ok(text) => toml::from_str(&text)
@@ -55,18 +60,27 @@ pub fn load_or_init(path: &Path) -> io::Result<AppConfig> {
         save(path, &config)?;
     }
 
-    if let Some(port) = std::env::var("DOTA_COMPANION_GSI_PORT")
-        .ok()
-        .and_then(|port_text| port_text.parse().ok())
+    apply_environment(&mut config, |name| std::env::var(name).ok());
+    Ok(config)
+}
+
+/// Sobrescreve a configuração com as variáveis de ambiente:
+/// `DOTA_COMPANION_GSI_PORT`, `DOTA_COMPANION_EXTRA_LIBRARIES` (caminhos
+/// separados por `:`) e `DOTA_COMPANION_GSI_LOG` (arquivo de log dos eventos).
+pub fn apply_environment(config: &mut AppConfig, lookup: impl Fn(&str) -> Option<String>) {
+    if let Some(port) =
+        lookup("DOTA_COMPANION_GSI_PORT").and_then(|port_text| port_text.parse().ok())
     {
         config.gsi_port = port;
     }
-    if let Ok(extra_paths) = std::env::var("DOTA_COMPANION_EXTRA_LIBRARIES") {
+    if let Some(extra_paths) = lookup("DOTA_COMPANION_EXTRA_LIBRARIES") {
         config.extra_libraries.extend(
             std::env::split_paths(&extra_paths).filter(|library| !library.as_os_str().is_empty()),
         );
     }
-    Ok(config)
+    if let Some(log_path) = lookup("DOTA_COMPANION_GSI_LOG").filter(|path| !path.is_empty()) {
+        config.gsi_log = Some(PathBuf::from(log_path));
+    }
 }
 
 /// Grava a configuração com permissão 0600.
@@ -124,5 +138,58 @@ mod tests {
         let config_file = temp_dir.path().join("config.toml");
         fs::write(&config_file, "gsi_port = \"not a number\"").unwrap();
         assert!(load_or_init(&config_file).is_err());
+    }
+
+    fn environment<'a>(
+        variables: &'a [(&'a str, &'a str)],
+    ) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            variables
+                .iter()
+                .find(|(variable, _)| *variable == name)
+                .map(|(_, value)| value.to_string())
+        }
+    }
+
+    #[test]
+    fn environment_overrides_port_and_adds_libraries_and_log_path() {
+        let mut config = AppConfig::default();
+        apply_environment(
+            &mut config,
+            environment(&[
+                ("DOTA_COMPANION_GSI_PORT", "4000"),
+                ("DOTA_COMPANION_EXTRA_LIBRARIES", "/games/a:/games/b"),
+                ("DOTA_COMPANION_GSI_LOG", "logs/gsi.jsonl"),
+            ]),
+        );
+        assert_eq!(config.gsi_port, 4000);
+        assert!(
+            config
+                .extra_libraries
+                .ends_with(&[PathBuf::from("/games/a"), PathBuf::from("/games/b")])
+        );
+        assert_eq!(config.gsi_log, Some(PathBuf::from("logs/gsi.jsonl")));
+    }
+
+    #[test]
+    fn keeps_defaults_when_variables_are_missing_or_invalid() {
+        let mut config = AppConfig::default();
+        apply_environment(
+            &mut config,
+            environment(&[
+                ("DOTA_COMPANION_GSI_PORT", "not a port"),
+                ("DOTA_COMPANION_GSI_LOG", ""),
+            ]),
+        );
+        assert_eq!(config, AppConfig::default());
+    }
+
+    #[test]
+    fn log_path_is_never_saved_to_config_file() {
+        let config = AppConfig {
+            gsi_log: Some(PathBuf::from("logs/gsi.jsonl")),
+            ..AppConfig::default()
+        };
+        assert!(!toml::to_string(&config).unwrap().contains("gsi_log"));
     }
 }

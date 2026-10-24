@@ -2,17 +2,18 @@
 //! executa os casos de uso e publica o novo `AppSnapshot`.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, watch};
 
 use crate::domain::gsi_config::GsiEndpoint;
 
 use super::event_bus::{CoreEvent, UiCommand};
-use super::ports::{ConfigFiles, ConnectionTester, DotaLocator, ProcessProbe};
+use super::ports::{ConfigFiles, ConnectionTester, DotaLocator, GsiRecorder, ProcessProbe};
 use super::state::{AppSnapshot, ConnectionTest};
 use super::use_cases::install_gsi_config::install_gsi_config;
 use super::use_cases::record_gsi_event::record_gsi_event;
+use super::use_cases::record_gsi_payload::{apply_record_result, payload_to_record};
 use super::use_cases::run_diagnostics::run_diagnostics;
 
 const DIAGNOSTICS_INTERVAL: Duration = Duration::from_secs(10);
@@ -24,6 +25,8 @@ pub struct CoreDependencies {
     pub probe: Arc<dyn ProcessProbe>,
     pub files: Arc<dyn ConfigFiles>,
     pub tester: Arc<dyn ConnectionTester>,
+    /// Presente quando a gravação de eventos em arquivo está ativa.
+    pub recorder: Option<Arc<dyn GsiRecorder>>,
     pub endpoint: GsiEndpoint,
 }
 
@@ -36,9 +39,16 @@ pub async fn run(
     state: Arc<watch::Sender<AppSnapshot>>,
 ) {
     let mut ticker = tokio::time::interval(DIAGNOSTICS_INTERVAL);
+    let payload_sender = dependencies
+        .recorder
+        .clone()
+        .map(|recorder| spawn_recorder(recorder, Arc::clone(&state)));
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
+                if let (Some(sender), Some(payload)) = (&payload_sender, payload_to_record(&event)) {
+                    let _ = sender.send(payload);
+                }
                 state.send_modify(|snapshot| record_gsi_event(&mut snapshot.gsi, event));
             }
             Some(command) = commands.recv() => handle_command(&dependencies, &state, command),
@@ -110,4 +120,30 @@ fn spawn_diagnostics(dependencies: &CoreDependencies, state: &Arc<watch::Sender<
         let report = build_diagnostics(&dependencies);
         state.send_modify(|snapshot| snapshot.diagnostics = Some(report));
     });
+}
+
+/// Grava os eventos em uma única tarefa, um de cada vez, para manter no
+/// arquivo a mesma ordem de chegada.
+fn spawn_recorder(
+    recorder: Arc<dyn GsiRecorder>,
+    state: Arc<watch::Sender<AppSnapshot>>,
+) -> mpsc::UnboundedSender<(SystemTime, Arc<str>)> {
+    let (payload_sender, mut payload_receiver) =
+        mpsc::unbounded_channel::<(SystemTime, Arc<str>)>();
+    tokio::spawn(async move {
+        while let Some((received_at, raw)) = payload_receiver.recv().await {
+            let recorder = Arc::clone(&recorder);
+            let Ok(result) =
+                tokio::task::spawn_blocking(move || recorder.record(received_at, &raw)).await
+            else {
+                break;
+            };
+            state.send_modify(|snapshot| {
+                if let Some(log_status) = &mut snapshot.gsi_log {
+                    apply_record_result(log_status, result);
+                }
+            });
+        }
+    });
+    payload_sender
 }

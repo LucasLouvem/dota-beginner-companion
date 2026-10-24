@@ -15,7 +15,7 @@ use relm4::RelmApp;
 use tokio::sync::{mpsc, watch};
 
 use application::core::{self, CoreDependencies};
-use application::state::AppSnapshot;
+use application::state::{AppSnapshot, GsiLogStatus};
 use domain::gsi_config::GsiEndpoint;
 use infrastructure::config;
 use presentation::app::{App, CoreHandle};
@@ -48,6 +48,11 @@ fn main() -> anyhow::Result<()> {
         probe: Arc::new(infrastructure::process::ProcProbe::default()),
         files: Arc::new(infrastructure::config_files::LocalConfigFiles),
         tester: Arc::new(gsi::client::HttpConnectionTester::new()),
+        recorder: config.gsi_log.clone().map(|log_path| {
+            Arc::new(infrastructure::gsi_log_file::JsonLinesGsiRecorder::new(
+                log_path,
+            )) as Arc<dyn application::ports::GsiRecorder>
+        }),
         endpoint: endpoint.clone(),
     };
 
@@ -59,6 +64,11 @@ fn main() -> anyhow::Result<()> {
     let (event_sender, event_receiver) = mpsc::channel(256);
     let (state_sender, state_receiver) = watch::channel(AppSnapshot {
         config_path,
+        gsi_log: config.gsi_log.clone().map(|path| GsiLogStatus {
+            path,
+            written: 0,
+            last_error: None,
+        }),
         ..AppSnapshot::default()
     });
 

@@ -48,6 +48,7 @@ Regras:
 | `ProcessProbe`              | `infrastructure::process`       | Informa se há processo `dota2` em `/proc/*/comm`              |
 | `ConfigFiles`               | `infrastructure::config_files`  | Lê, grava (de forma atômica) e faz backup dos arquivos `.cfg` |
 | `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                |
+| `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)     |
 
 Nos testes, os casos de uso recebem implementações falsas desses ports.
 
@@ -66,6 +67,7 @@ O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de te
 - `main.rs` cria um runtime tokio próprio. O servidor GSI e o laço do núcleo rodam nele.
 - A thread do GTK só executa a interface. Ela recebe o estado por `watch` dentro de um comando Relm4.
 - Operações de arquivo e de `/proc` rodam em `spawn_blocking`, e o teste de conexão roda em uma tarefa separada. A interface nunca espera por I/O.
+- Quando o log de eventos está ativo (`DOTA_COMPANION_GSI_LOG`), uma única tarefa grava os eventos do Dota um de cada vez, na ordem de chegada. Eventos de teste e requisições recusadas não são gravados.
 
 ## Segurança do servidor GSI
 

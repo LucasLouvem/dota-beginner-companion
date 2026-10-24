@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use crate::domain::diagnostics::DiagnosticReport;
 
 use super::event_bus::RejectReason;
+use super::ports::GsiRecordError;
 
 /// Estado do servidor GSI local.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -62,6 +63,15 @@ pub enum ConnectionTest {
     Failed(String),
 }
 
+/// Gravação dos eventos GSI do Dota em arquivo, ativada por configuração.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GsiLogStatus {
+    pub path: PathBuf,
+    /// Eventos gravados com sucesso desde que o aplicativo abriu.
+    pub written: u64,
+    pub last_error: Option<GsiRecordError>,
+}
+
 /// Estado completo exibido pela interface.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppSnapshot {
@@ -74,4 +84,6 @@ pub struct AppSnapshot {
     pub connection_test: Option<ConnectionTest>,
     /// Onde o token e a porta do aplicativo estão guardados.
     pub config_path: PathBuf,
+    /// Presente quando a gravação de eventos em arquivo está ativa.
+    pub gsi_log: Option<GsiLogStatus>,
 }

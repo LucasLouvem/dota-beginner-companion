@@ -10,7 +10,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::application::event_bus::{RejectReason, UiCommand};
 use crate::application::state::{
-    AppSnapshot, ConnectionTest, InstallOutcome, ReceivedEvent, ServerState,
+    AppSnapshot, ConnectionTest, GsiLogStatus, InstallOutcome, ReceivedEvent, ServerState,
 };
 use crate::domain::diagnostics::{DiagnosticReport, GsiConfigState};
 use crate::domain::gsi_config::ConfigMatch;
@@ -491,6 +491,10 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
         }
     });
 
+    if let Some(log_status) = &snapshot.gsi_log {
+        rows.push(gsi_log_row(log_status));
+    }
+
     if let Some((at, reason)) = gsi.last_rejection {
         let reason = match reason {
             RejectReason::InvalidToken => translate("token inválido"),
@@ -520,6 +524,28 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
         )),
     }
     rows
+}
+
+fn gsi_log_row(log_status: &GsiLogStatus) -> adw::ActionRow {
+    let log_path = log_status.path.display().to_string();
+    match log_status.last_error {
+        None => status_row(
+            Level::Info,
+            &translate_with(
+                "Gravando eventos do Dota: {}",
+                &[&log_status.written.to_string()],
+            ),
+            &translate_with(
+                "{} — o arquivo contém SteamID e nome do jogador; não compartilhe.",
+                &[&log_path],
+            ),
+        ),
+        Some(record_error) => status_row(
+            Level::Error,
+            &translate("Falha ao gravar o log de eventos GSI"),
+            &format!("{log_path} — {record_error}"),
+        ),
+    }
 }
 
 fn confirm_overwrite(

@@ -110,7 +110,10 @@ Detalhes em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   tudo em `String`.
 - Sem `unsafe` sem aprovação prévia e comentário `// SAFETY:`.
 - Use `tracing` para logs, nunca `println!`. Não registre tokens,
-  chaves de API ou dados pessoais.
+  chaves de API ou dados pessoais. Única exceção: o log de eventos
+  GSI (`DOTA_COMPANION_GSI_LOG`), opcional e só para desenvolvimento,
+  grava o payload completo sem o token; a pasta `logs/` nunca é
+  versionada.
 - Prefira tipos que tornem estados inválidos irrepresentáveis
   (newtypes, enums) a validações espalhadas.
 

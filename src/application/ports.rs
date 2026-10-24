@@ -4,6 +4,7 @@ use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::time::SystemTime;
 
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
@@ -35,6 +36,20 @@ pub trait ConfigFiles: Send + Sync {
     fn write(&self, path: &Path, contents: &str) -> io::Result<()>;
     /// Copia o arquivo para um nome de backup único e devolve o caminho dele.
     fn backup(&self, path: &Path) -> io::Result<PathBuf>;
+}
+
+/// Falha ao gravar um evento GSI no arquivo de log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum GsiRecordError {
+    #[error("não foi possível abrir ou gravar o arquivo ({0})")]
+    Write(io::ErrorKind),
+    #[error("o evento recebido não é um JSON válido")]
+    InvalidPayload,
+}
+
+/// Grava os eventos GSI recebidos do Dota, em ordem de chegada.
+pub trait GsiRecorder: Send + Sync {
+    fn record(&self, received_at: SystemTime, raw: &str) -> Result<(), GsiRecordError>;
 }
 
 /// Verifica se o servidor GSI local aceita eventos.

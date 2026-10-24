@@ -60,6 +60,7 @@ As variáveis de ambiente abaixo têm prioridade sobre o arquivo. Elas também p
 
 - `DOTA_COMPANION_GSI_PORT`: porta do servidor.
 - `DOTA_COMPANION_EXTRA_LIBRARIES`: bibliotecas extras, separadas por `:`.
+- `DOTA_COMPANION_GSI_LOG`: arquivo onde cada evento recebido do Dota é gravado em JSON Lines, para desenvolvimento. Acompanhe com `tail -f logs/gsi.jsonl | jq`. O arquivo contém SteamID e nome do jogador; a pasta `logs/` não é versionada.
 
 Se mudar a porta ou o token, reinstale o arquivo GSI pelo Diagnóstico.
 

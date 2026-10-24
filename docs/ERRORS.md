@@ -63,6 +63,13 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
 | ----------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
 | `config.toml` com conteúdo inválido | O aplicativo encerra e mostra o caminho e a causa no terminal | Corrigir ou apagar o arquivo (um novo token será gerado) |
 
+### Log de eventos GSI (`GsiRecordError`)
+
+| Variante         | Estado                                                       | Ação para o usuário                                                   |
+| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `Write(tipo)`    | "Falha ao gravar o log de eventos GSI", com caminho e motivo | Criar a pasta do arquivo ou corrigir a permissão; o app segue rodando |
+| `InvalidPayload` | Mesma linha, com "o evento recebido não é um JSON válido"    | —                                                                     |
+
 ### Teste de conexão
 
 | Situação                                           | Estado                                       | Ação para o usuário                           |
