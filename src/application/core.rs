@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::{JoinError, JoinHandle};
 
 use crate::domain::gsi_config::GsiEndpoint;
+use crate::domain::match_events::MatchTracker;
 
 use super::diagnostics::DiagnosticReport;
 use super::error::{ToDiagnostic, log_error};
@@ -20,6 +21,7 @@ use super::use_cases::install_gsi_config::install_gsi_config;
 use super::use_cases::record_gsi_event::record_gsi_event;
 use super::use_cases::record_gsi_payload::{apply_record_result, payload_to_record};
 use super::use_cases::run_diagnostics::run_diagnostics;
+use super::use_cases::track_match::{record_manual_match_found, record_match_update};
 
 const DIAGNOSTICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -52,13 +54,25 @@ pub async fn run(
         .recorder
         .clone()
         .map(|recorder| spawn_recorder(recorder, Arc::clone(&state)));
+    let mut match_tracker = MatchTracker::default();
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
                 if let Some(payload) = payload_to_record(&event) {
                     send_to_recorder(&mut payload_sender, payload, &state);
                 }
-                state.send_modify(|snapshot| record_gsi_event(&mut snapshot.gsi, event));
+                let match_update = match &event {
+                    CoreEvent::GsiAccepted { game: Some(game), at, .. } => {
+                        Some((game.clone(), match_tracker.observe(game.clone()), *at))
+                    }
+                    _ => None,
+                };
+                state.send_modify(|snapshot| {
+                    record_gsi_event(&mut snapshot.gsi, event);
+                    if let Some((game, match_events, at)) = match_update {
+                        record_match_update(&mut snapshot.match_status, game, match_events, at);
+                    }
+                });
             }
             Some(command) = commands.recv() => handle_command(&dependencies, &state, command),
             _ = ticker.tick() => spawn_diagnostics(&dependencies, &state),
@@ -73,6 +87,9 @@ fn handle_command(
 ) {
     match command {
         UiCommand::RunDiagnostics => spawn_diagnostics(dependencies, state),
+        UiCommand::MarkMatchFound => state.send_modify(|snapshot| {
+            record_manual_match_found(&mut snapshot.match_status, SystemTime::now());
+        }),
         UiCommand::TestConnection => {
             state.send_modify(|snapshot| snapshot.connection_test = Some(ConnectionTest::Running));
             let dependencies = dependencies.clone();

@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::domain::game::GameSnapshot;
+use crate::domain::match_events::MatchEvent;
+
 use super::diagnostics::DiagnosticReport;
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText};
 use super::event_bus::{GsiServerError, RejectReason};
@@ -158,10 +161,27 @@ pub struct GsiLogStatus {
     pub stopped: Option<TaskInterrupted>,
 }
 
+/// Evento da partida com o horário em que o aplicativo o registrou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineEntry {
+    pub at: SystemTime,
+    pub event: MatchEvent,
+}
+
+/// Estado de jogo mais recente e a linha do tempo da partida acompanhada.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchStatus {
+    /// Último estado normalizado de um evento do Dota.
+    pub game: Option<GameSnapshot>,
+    /// Eventos da partida atual, do mais antigo ao mais recente.
+    pub timeline: Vec<TimelineEntry>,
+}
+
 /// Estado completo exibido pela interface.
 #[derive(Debug, Clone, Default)]
 pub struct AppSnapshot {
     pub gsi: GsiStatus,
+    pub match_status: MatchStatus,
     pub diagnostics: Option<DiagnosticReport>,
     /// Última rodada de diagnóstico interrompida; limpa na próxima que termina.
     pub diagnostics_interrupted: Option<TaskInterrupted>,

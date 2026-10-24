@@ -8,7 +8,9 @@ pub fn record_gsi_event(status: &mut GsiStatus, event: CoreEvent) {
     match event {
         CoreEvent::ServerListening(address) => status.server = ServerState::Listening(address),
         CoreEvent::ServerFailed(error) => status.server = ServerState::Failed(error),
-        CoreEvent::GsiAccepted { raw, at, is_test } => {
+        CoreEvent::GsiAccepted {
+            raw, at, is_test, ..
+        } => {
             let received = Some(ReceivedEvent { at, raw });
             if is_test {
                 status.last_test_event = received;

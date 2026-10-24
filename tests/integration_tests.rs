@@ -8,5 +8,6 @@ mod integration {
     mod match_flow;
     mod panic_output;
     mod process;
+    mod replay_cli;
     mod test_event_cli;
 }

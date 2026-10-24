@@ -1,6 +1,7 @@
 //! Testes unitários de `src/gsi/server.rs`.
 
 use super::*;
+use crate::domain::game::GamePhase;
 use axum::body::Body;
 use axum::http::Request;
 use std::time::Duration;
@@ -50,24 +51,40 @@ async fn accepts_request_with_valid_token_and_hides_token_from_payload() {
     let after = SystemTime::now();
 
     assert_eq!(status, StatusCode::OK);
-    let [CoreEvent::GsiAccepted { raw, at, is_test }] = events.as_slice() else {
+    let [
+        CoreEvent::GsiAccepted {
+            raw,
+            at,
+            is_test,
+            game,
+        },
+    ] = events.as_slice()
+    else {
         panic!("esperava um único evento aceito: {events:?}");
     };
     assert!(!is_test);
     assert!(before <= *at && *at <= after);
     let payload: Value = serde_json::from_str(raw).unwrap();
     assert_eq!(payload, serde_json::json!({ "map": { "game_state": "X" } }));
+    assert_eq!(
+        game.as_ref().and_then(|game| game.phase.clone()),
+        Some(GamePhase::Other("X".into()))
+    );
 }
 
 #[tokio::test]
-async fn marks_event_as_test_when_test_marker_is_present() {
+async fn marks_event_as_test_without_game_state_when_test_marker_is_present() {
     let (status, events) =
         post_to_router(r#"{"auth":{"token":"secret"},"dota_companion_test":true}"#).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         matches!(
             events.as_slice(),
-            [CoreEvent::GsiAccepted { is_test: true, .. }]
+            [CoreEvent::GsiAccepted {
+                is_test: true,
+                game: None,
+                ..
+            }]
         ),
         "{events:?}"
     );

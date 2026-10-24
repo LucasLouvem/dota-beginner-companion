@@ -14,6 +14,7 @@ pub fn payload_to_record(event: &CoreEvent) -> Option<(SystemTime, Arc<str>)> {
             raw,
             at,
             is_test: false,
+            ..
         } => Some((*at, Arc::clone(raw))),
         _ => None,
     }

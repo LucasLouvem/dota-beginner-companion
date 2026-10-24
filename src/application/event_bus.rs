@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use crate::domain::game::GameSnapshot;
+
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
 
 /// Eventos produzidos pelos adaptadores de entrada (servidor GSI).
@@ -18,6 +20,8 @@ pub enum CoreEvent {
         at: SystemTime,
         /// Evento enviado pelo botão "Testar conexão", não pelo Dota.
         is_test: bool,
+        /// Estado de jogo normalizado; ausente nos eventos de teste.
+        game: Option<GameSnapshot>,
     },
     GsiRejected {
         reason: RejectReason,
@@ -106,6 +110,8 @@ pub enum UiCommand {
         /// O usuário confirmou a substituição de um arquivo diferente.
         overwrite: bool,
     },
+    /// O usuário marcou "Partida encontrada", sem depender do GSI.
+    MarkMatchFound,
 }
 
 impl UiCommand {
@@ -115,6 +121,7 @@ impl UiCommand {
             UiCommand::RunDiagnostics => "executar o diagnóstico",
             UiCommand::TestConnection => "testar a conexão",
             UiCommand::InstallGsiConfig { .. } => "instalar a configuração GSI",
+            UiCommand::MarkMatchFound => "marcar a partida encontrada",
         }
     }
 }
@@ -145,6 +152,9 @@ impl ToDiagnostic for CoreConnectionError {
                 UiCommand::TestConnection => "O pedido para testar a conexão não foi recebido.",
                 UiCommand::InstallGsiConfig { .. } => {
                     "O pedido para instalar a configuração GSI não foi recebido."
+                }
+                UiCommand::MarkMatchFound => {
+                    "O pedido para marcar a partida encontrada não foi recebido."
                 }
             },
             CoreConnectionError::EventRejected => {

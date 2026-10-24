@@ -17,6 +17,7 @@ fn accepted(is_test: bool) -> CoreEvent {
         raw: RAW_PAYLOAD.into(),
         at: received_at(),
         is_test,
+        game: None,
     }
 }
 

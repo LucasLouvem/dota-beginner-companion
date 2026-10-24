@@ -19,6 +19,8 @@ use tokio::sync::mpsc::error::SendError;
 use crate::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
 use crate::application::event_bus::{CoreConnectionError, CoreEvent, GsiServerError, RejectReason};
 
+use super::normalize;
+
 /// Tamanho máximo aceito para o corpo de uma requisição.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// Campo presente apenas nos eventos enviados pelo botão "Testar conexão".
@@ -117,12 +119,15 @@ async fn receive(State(state): State<ServerState>, body: Bytes) -> StatusCode {
     }
     let raw = serde_json::to_string_pretty(&payload)
         .expect("um Value lido de JSON tem só chaves de texto e sempre volta a ser serializado");
+    // O evento de teste é sintético e não descreve uma partida.
+    let game = (!is_test).then(|| normalize::game_snapshot(&payload));
     let delivered = state
         .events
         .send(CoreEvent::GsiAccepted {
             raw: raw.into(),
             at: received_at,
             is_test,
+            game,
         })
         .await;
     if delivered.is_err() {

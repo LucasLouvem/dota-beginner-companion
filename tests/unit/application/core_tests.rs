@@ -4,6 +4,8 @@ use super::*;
 use crate::application::error::{DiagnosticCode, Redactor};
 use crate::application::ports::{BoxFuture, ConnectionTestError, GsiRecordError, LocatorResult};
 use crate::application::state::GsiLogStatus;
+use crate::domain::game::{GamePhase, GameSnapshot};
+use crate::domain::match_events::{MatchEvent, MatchEventKind, Provenance};
 use crate::test_support::{MemoryFiles, capture_logs};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -138,7 +140,94 @@ fn dota_event() -> CoreEvent {
         raw: format!(r#"{{"player":{{"name":"{SIMULATED_SECRET}"}}}}"#).into(),
         at: SystemTime::now(),
         is_test: false,
+        game: Some(GameSnapshot::menu()),
     }
+}
+
+fn dota_event_in(phase: GamePhase) -> CoreEvent {
+    CoreEvent::GsiAccepted {
+        raw: "{}".into(),
+        at: SystemTime::now(),
+        is_test: false,
+        game: Some(GameSnapshot {
+            phase: Some(phase),
+            ..GameSnapshot::menu()
+        }),
+    }
+}
+
+#[tokio::test]
+async fn dota_events_update_game_state_and_match_timeline() {
+    let mut core = start(dependencies(), AppSnapshot::default());
+
+    core.events.send(dota_event()).await.unwrap();
+    core.events
+        .send(dota_event_in(GamePhase::HeroSelection))
+        .await
+        .unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        !snapshot.match_status.timeline.is_empty()
+    })
+    .await;
+    assert_eq!(
+        snapshot
+            .match_status
+            .game
+            .as_ref()
+            .and_then(|game| game.phase.clone()),
+        Some(GamePhase::HeroSelection)
+    );
+    let kinds: Vec<_> = snapshot
+        .match_status
+        .timeline
+        .iter()
+        .map(|entry| entry.event.clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![MatchEvent {
+            kind: MatchEventKind::MatchFound,
+            provenance: Provenance::Inferred,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn test_events_do_not_change_match_state() {
+    let mut core = start(dependencies(), AppSnapshot::default());
+
+    core.events
+        .send(CoreEvent::GsiAccepted {
+            raw: "{}".into(),
+            at: SystemTime::now(),
+            is_test: true,
+            game: None,
+        })
+        .await
+        .unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        snapshot.gsi.last_test_event.is_some()
+    })
+    .await;
+    assert_eq!(snapshot.match_status, Default::default());
+}
+
+#[tokio::test]
+async fn mark_match_found_command_adds_manual_event() {
+    let mut core = start(dependencies(), AppSnapshot::default());
+
+    core.commands.send(UiCommand::MarkMatchFound).unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        !snapshot.match_status.timeline.is_empty()
+    })
+    .await;
+    assert_eq!(
+        snapshot.match_status.timeline[0].event,
+        MatchEvent::manual_match_found()
+    );
 }
 
 #[tokio::test]
