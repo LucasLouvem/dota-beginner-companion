@@ -1,0 +1,146 @@
+//! Conteúdo do arquivo de configuração do Game State Integration (GSI).
+//!
+//! O Dota lê todos os arquivos `gamestate_integration_*.cfg` da pasta
+//! `game/dota/cfg/gamestate_integration/` e envia POSTs JSON para a `uri` de
+//! cada um.
+
+use super::keyvalues::{self, KvValue};
+
+/// Nome do arquivo `.cfg` criado por este aplicativo.
+pub const CONFIG_FILE_NAME: &str = "gamestate_integration_dota_companion.cfg";
+const SECTION_NAME: &str = "Dota Beginner Companion";
+
+/// Blocos de dados pedidos ao Dota. `draft` e `wearables` ficam de fora:
+/// não são necessários e o draft pode trazer escolhas de outros jogadores.
+pub const REQUESTED_DATA: &[&str] = &["provider", "map", "player", "hero", "abilities", "items"];
+
+/// Porta e token que o Dota usa para enviar eventos ao aplicativo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GsiEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+
+impl GsiEndpoint {
+    /// Sempre `127.0.0.1`: o servidor nunca escuta em outras interfaces.
+    pub fn uri(&self) -> String {
+        format!("http://127.0.0.1:{}/", self.port)
+    }
+}
+
+/// Gera o conteúdo do arquivo `.cfg` para o endereço e token informados.
+pub fn render(endpoint: &GsiEndpoint) -> String {
+    let mut data = String::new();
+    for key in REQUESTED_DATA {
+        data.push_str(&format!("        \"{key}\" \"1\"\n"));
+    }
+    format!(
+        "// Gerado pelo Dota Beginner Companion.\n\
+         // Envia o estado do jogo somente para este computador (127.0.0.1).\n\
+         \"{SECTION_NAME}\"\n\
+         {{\n\
+         \x20   \"uri\" \"{uri}\"\n\
+         \x20   \"timeout\" \"5.0\"\n\
+         \x20   \"buffer\" \"0.1\"\n\
+         \x20   \"throttle\" \"0.5\"\n\
+         \x20   \"heartbeat\" \"30.0\"\n\
+         \x20   \"data\"\n\
+         \x20   {{\n\
+         {data}\
+         \x20   }}\n\
+         \x20   \"auth\"\n\
+         \x20   {{\n\
+         \x20       \"token\" \"{token}\"\n\
+         \x20   }}\n\
+         }}\n",
+        uri = endpoint.uri(),
+        token = endpoint.token,
+    )
+}
+
+/// Resultado da comparação de um `.cfg` existente com o esperado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigMatch {
+    /// Mesmo endereço e token esperados pelo aplicativo.
+    Matches,
+    UriMismatch {
+        found: Option<String>,
+    },
+    TokenMismatch,
+    Unparsable(String),
+}
+
+/// Compara um arquivo existente com o que o aplicativo espera.
+pub fn inspect(contents: &str, expected: &GsiEndpoint) -> ConfigMatch {
+    let root = match keyvalues::parse(contents) {
+        Ok(root) => root,
+        Err(e) => return ConfigMatch::Unparsable(e.to_string()),
+    };
+    let Some((_, section)) = root
+        .entries()
+        .iter()
+        .find(|(_, v)| matches!(v, KvValue::Section(_)))
+    else {
+        return ConfigMatch::Unparsable("nenhuma seção encontrada".into());
+    };
+
+    let uri = section.get("uri").and_then(KvValue::as_text);
+    if uri.map(|u| u.trim_end_matches('/')) != Some(expected.uri().trim_end_matches('/')) {
+        return ConfigMatch::UriMismatch {
+            found: uri.map(str::to_owned),
+        };
+    }
+    let token = section
+        .get("auth")
+        .and_then(|a| a.get("token"))
+        .and_then(KvValue::as_text);
+    if token != Some(expected.token.as_str()) {
+        return ConfigMatch::TokenMismatch;
+    }
+    ConfigMatch::Matches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint() -> GsiEndpoint {
+        GsiEndpoint {
+            port: 53000,
+            token: "abc123".into(),
+        }
+    }
+
+    #[test]
+    fn rendered_config_round_trips() {
+        let text = render(&endpoint());
+        assert!(text.contains("\"uri\" \"http://127.0.0.1:53000/\""));
+        assert!(!text.contains("draft"));
+        assert_eq!(inspect(&text, &endpoint()), ConfigMatch::Matches);
+    }
+
+    #[test]
+    fn detects_mismatches() {
+        let text = render(&endpoint());
+        let other_token = GsiEndpoint {
+            token: "zzz".into(),
+            ..endpoint()
+        };
+        assert_eq!(inspect(&text, &other_token), ConfigMatch::TokenMismatch);
+
+        let other_port = GsiEndpoint {
+            port: 4000,
+            ..endpoint()
+        };
+        assert_eq!(
+            inspect(&text, &other_port),
+            ConfigMatch::UriMismatch {
+                found: Some("http://127.0.0.1:53000/".into())
+            }
+        );
+        assert!(matches!(
+            inspect("\"x\" {", &endpoint()),
+            ConfigMatch::Unparsable(_)
+        ));
+    }
+}
