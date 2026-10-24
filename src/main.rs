@@ -14,7 +14,7 @@ use anyhow::Context;
 use relm4::RelmApp;
 use tokio::sync::{mpsc, watch};
 
-use application::core::{self, CoreDeps};
+use application::core::{self, CoreDependencies};
 use application::state::AppSnapshot;
 use domain::gsi_config::GsiEndpoint;
 use infrastructure::config;
@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_default();
 
-    let deps = CoreDeps {
+    let dependencies = CoreDependencies {
         locator: Arc::new(infrastructure::steam_locator::SteamLocator::new(
             home,
             config.extra_libraries.clone(),
@@ -55,9 +55,9 @@ fn main() -> anyhow::Result<()> {
         .worker_threads(2)
         .enable_all()
         .build()?;
-    let (command_tx, command_rx) = mpsc::unbounded_channel();
-    let (event_tx, event_rx) = mpsc::channel(256);
-    let (state_tx, state_rx) = watch::channel(AppSnapshot {
+    let (command_sender, command_receiver) = mpsc::unbounded_channel();
+    let (event_sender, event_receiver) = mpsc::channel(256);
+    let (state_sender, state_receiver) = watch::channel(AppSnapshot {
         config_path,
         ..AppSnapshot::default()
     });
@@ -65,16 +65,21 @@ fn main() -> anyhow::Result<()> {
     runtime.spawn(gsi::server::serve(
         endpoint.port,
         endpoint.token.into(),
-        event_tx,
+        event_sender,
     ));
-    runtime.spawn(core::run(deps, command_rx, event_rx, Arc::new(state_tx)));
+    runtime.spawn(core::run(
+        dependencies,
+        command_receiver,
+        event_receiver,
+        Arc::new(state_sender),
+    ));
 
     // GTK recebe só o nome do programa; argumentos são nossos.
     RelmApp::new(APP_ID)
         .with_args(Vec::new())
         .run::<App>(CoreHandle {
-            commands: command_tx,
-            state: state_rx,
+            commands: command_sender,
+            state: state_receiver,
         });
     runtime.shutdown_background();
     Ok(())

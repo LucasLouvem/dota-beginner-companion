@@ -22,20 +22,20 @@ pub fn install_gsi_config(
         proton_prefix: false,
     };
     let path = install.gsi_config_path();
-    let failed = |e: std::io::Error| InstallOutcome::Failed {
+    let failed = |io_error: std::io::Error| InstallOutcome::Failed {
         path: path.clone(),
-        error: e.to_string(),
+        error: io_error.to_string(),
     };
 
     let contents = gsi_config::render(endpoint);
     match files.read(&path) {
-        Err(e) => failed(e),
+        Err(io_error) => failed(io_error),
         Ok(None) => match files
             .ensure_dir(&install.gsi_dir())
             .and_then(|()| files.write(&path, &contents))
         {
             Ok(()) => InstallOutcome::Created(path.clone()),
-            Err(e) => failed(e),
+            Err(io_error) => failed(io_error),
         },
         Ok(Some(existing)) => {
             if gsi_config::inspect(&existing, endpoint) == ConfigMatch::Matches {
@@ -45,13 +45,13 @@ pub fn install_gsi_config(
                 return InstallOutcome::NeedsConfirmation(path.clone());
             }
             match files.backup(&path) {
-                Err(e) => failed(e),
+                Err(io_error) => failed(io_error),
                 Ok(backup) => match files.write(&path, &contents) {
                     Ok(()) => InstallOutcome::Replaced {
                         path: path.clone(),
                         backup,
                     },
-                    Err(e) => failed(e),
+                    Err(io_error) => failed(io_error),
                 },
             }
         }
@@ -71,47 +71,72 @@ mod tests {
         }
     }
 
-    fn cfg_path(root: &Path) -> PathBuf {
-        DotaInstall::game_root_for(root)
+    fn expected_config_path(library_root: &Path) -> PathBuf {
+        DotaInstall::game_root_for(library_root)
             .join("game/dota/cfg/gamestate_integration")
             .join(gsi_config::CONFIG_FILE_NAME)
     }
 
+    const OTHER_APP_CONFIG: &str = "\"old\" { \"uri\" \"http://elsewhere\" }";
+
     #[test]
-    fn creates_then_reports_unchanged() {
+    fn creates_config_when_none_exists() {
         let files = MemoryFiles::default();
-        let root = Path::new("/lib");
-        let path = cfg_path(root);
+        let library_root = Path::new("/lib");
+        let config_path = expected_config_path(library_root);
 
         assert_eq!(
-            install_gsi_config(&files, root, &endpoint(), false),
-            InstallOutcome::Created(path.clone())
+            install_gsi_config(&files, library_root, &endpoint(), false),
+            InstallOutcome::Created(config_path.clone())
         );
-        assert_eq!(files.get(&path), Some(gsi_config::render(&endpoint())));
         assert_eq!(
-            install_gsi_config(&files, root, &endpoint(), false),
-            InstallOutcome::Unchanged(path)
+            files.get(&config_path),
+            Some(gsi_config::render(&endpoint()))
         );
     }
 
     #[test]
-    fn asks_before_replacing_and_backs_up() {
+    fn reports_unchanged_when_config_already_matches() {
         let files = MemoryFiles::default();
-        let root = Path::new("/lib");
-        let path = cfg_path(root);
-        files.put(&path, "\"old\" { \"uri\" \"http://elsewhere\" }");
+        let library_root = Path::new("/lib");
+        let config_path = expected_config_path(library_root);
+        files.put(&config_path, &gsi_config::render(&endpoint()));
 
         assert_eq!(
-            install_gsi_config(&files, root, &endpoint(), false),
-            InstallOutcome::NeedsConfirmation(path.clone())
+            install_gsi_config(&files, library_root, &endpoint(), false),
+            InstallOutcome::Unchanged(config_path)
         );
-        assert!(files.get(&path).unwrap().contains("elsewhere"));
+    }
 
-        let outcome = install_gsi_config(&files, root, &endpoint(), true);
+    #[test]
+    fn asks_confirmation_and_keeps_file_when_existing_config_differs() {
+        let files = MemoryFiles::default();
+        let library_root = Path::new("/lib");
+        let config_path = expected_config_path(library_root);
+        files.put(&config_path, OTHER_APP_CONFIG);
+
+        assert_eq!(
+            install_gsi_config(&files, library_root, &endpoint(), false),
+            InstallOutcome::NeedsConfirmation(config_path.clone())
+        );
+        assert_eq!(files.get(&config_path).as_deref(), Some(OTHER_APP_CONFIG));
+    }
+
+    #[test]
+    fn backs_up_and_replaces_when_overwrite_is_confirmed() {
+        let files = MemoryFiles::default();
+        let library_root = Path::new("/lib");
+        let config_path = expected_config_path(library_root);
+        files.put(&config_path, OTHER_APP_CONFIG);
+
+        let outcome = install_gsi_config(&files, library_root, &endpoint(), true);
         let InstallOutcome::Replaced { backup, .. } = outcome else {
             panic!("esperava Replaced, veio {outcome:?}");
         };
-        assert!(files.get(&backup).unwrap().contains("elsewhere"));
-        assert_eq!(files.get(&path), Some(gsi_config::render(&endpoint())));
+        assert_eq!(files.get(&backup).as_deref(), Some(OTHER_APP_CONFIG));
+        assert_eq!(
+            files.get(&config_path),
+            Some(gsi_config::render(&endpoint()))
+        );
     }
 }

@@ -19,7 +19,7 @@ const DIAGNOSTICS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Adaptadores e configuração usados pelos casos de uso do núcleo.
 #[derive(Clone)]
-pub struct CoreDeps {
+pub struct CoreDependencies {
     pub locator: Arc<dyn DotaLocator>,
     pub probe: Arc<dyn ProcessProbe>,
     pub files: Arc<dyn ConfigFiles>,
@@ -27,8 +27,10 @@ pub struct CoreDeps {
     pub endpoint: GsiEndpoint,
 }
 
+/// Processa eventos do coletor GSI e comandos da interface até os canais fecharem,
+/// rodando o diagnóstico a cada `DIAGNOSTICS_INTERVAL`.
 pub async fn run(
-    deps: CoreDeps,
+    dependencies: CoreDependencies,
     mut commands: mpsc::UnboundedReceiver<UiCommand>,
     mut events: mpsc::Receiver<CoreEvent>,
     state: Arc<watch::Sender<AppSnapshot>>,
@@ -37,65 +39,75 @@ pub async fn run(
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
-                state.send_modify(|s| record_gsi_event(&mut s.gsi, event));
+                state.send_modify(|snapshot| record_gsi_event(&mut snapshot.gsi, event));
             }
-            Some(command) = commands.recv() => handle_command(&deps, &state, command),
-            _ = ticker.tick() => spawn_diagnostics(&deps, &state),
+            Some(command) = commands.recv() => handle_command(&dependencies, &state, command),
+            _ = ticker.tick() => spawn_diagnostics(&dependencies, &state),
             else => break,
         }
     }
 }
 
-fn handle_command(deps: &CoreDeps, state: &Arc<watch::Sender<AppSnapshot>>, command: UiCommand) {
+fn handle_command(
+    dependencies: &CoreDependencies,
+    state: &Arc<watch::Sender<AppSnapshot>>,
+    command: UiCommand,
+) {
     match command {
-        UiCommand::RunDiagnostics => spawn_diagnostics(deps, state),
+        UiCommand::RunDiagnostics => spawn_diagnostics(dependencies, state),
         UiCommand::TestConnection => {
-            state.send_modify(|s| s.connection_test = Some(ConnectionTest::Running));
-            let (deps, state) = (deps.clone(), Arc::clone(state));
+            state.send_modify(|snapshot| snapshot.connection_test = Some(ConnectionTest::Running));
+            let (dependencies, state) = (dependencies.clone(), Arc::clone(state));
             tokio::spawn(async move {
-                let result = match deps.tester.send_test_event(&deps.endpoint).await {
+                let result = match dependencies
+                    .tester
+                    .send_test_event(&dependencies.endpoint)
+                    .await
+                {
                     Ok(()) => ConnectionTest::Passed,
-                    Err(e) => ConnectionTest::Failed(e),
+                    Err(reason) => ConnectionTest::Failed(reason),
                 };
-                state.send_modify(|s| s.connection_test = Some(result));
+                state.send_modify(|snapshot| snapshot.connection_test = Some(result));
             });
         }
         UiCommand::InstallGsiConfig {
             install_root,
             overwrite,
         } => {
-            let (deps, state) = (deps.clone(), Arc::clone(state));
+            let (dependencies, state) = (dependencies.clone(), Arc::clone(state));
             tokio::task::spawn_blocking(move || {
                 let outcome = install_gsi_config(
-                    deps.files.as_ref(),
+                    dependencies.files.as_ref(),
                     &install_root,
-                    &deps.endpoint,
+                    &dependencies.endpoint,
                     overwrite,
                 );
-                let report = diagnostics(&deps);
-                state.send_modify(|s| {
-                    s.last_install = Some(outcome);
-                    s.install_attempt += 1;
-                    s.diagnostics = Some(report);
+                let report = build_diagnostics(&dependencies);
+                state.send_modify(|snapshot| {
+                    snapshot.last_install = Some(outcome);
+                    snapshot.install_attempt += 1;
+                    snapshot.diagnostics = Some(report);
                 });
             });
         }
     }
 }
 
-fn diagnostics(deps: &CoreDeps) -> crate::domain::diagnostics::DiagnosticReport {
+fn build_diagnostics(
+    dependencies: &CoreDependencies,
+) -> crate::domain::diagnostics::DiagnosticReport {
     run_diagnostics(
-        deps.locator.as_ref(),
-        deps.probe.as_ref(),
-        deps.files.as_ref(),
-        &deps.endpoint,
+        dependencies.locator.as_ref(),
+        dependencies.probe.as_ref(),
+        dependencies.files.as_ref(),
+        &dependencies.endpoint,
     )
 }
 
-fn spawn_diagnostics(deps: &CoreDeps, state: &Arc<watch::Sender<AppSnapshot>>) {
-    let (deps, state) = (deps.clone(), Arc::clone(state));
+fn spawn_diagnostics(dependencies: &CoreDependencies, state: &Arc<watch::Sender<AppSnapshot>>) {
+    let (dependencies, state) = (dependencies.clone(), Arc::clone(state));
     tokio::task::spawn_blocking(move || {
-        let report = diagnostics(&deps);
-        state.send_modify(|s| s.diagnostics = Some(report));
+        let report = build_diagnostics(&dependencies);
+        state.send_modify(|snapshot| snapshot.diagnostics = Some(report));
     });
 }

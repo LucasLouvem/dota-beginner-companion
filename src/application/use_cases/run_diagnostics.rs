@@ -22,7 +22,7 @@ pub fn run_diagnostics(
             let config = match files.read(&config_path) {
                 Ok(None) => GsiConfigState::Missing,
                 Ok(Some(text)) => GsiConfigState::Present(gsi_config::inspect(&text, endpoint)),
-                Err(e) => GsiConfigState::Unreadable(e.to_string()),
+                Err(io_error) => GsiConfigState::Unreadable(io_error.to_string()),
             };
             InstallCheck {
                 install,
@@ -47,10 +47,11 @@ mod tests {
     use crate::application::use_cases::test_support::MemoryFiles;
     use crate::domain::dota_install::DotaInstall;
     use crate::domain::gsi_config::ConfigMatch;
-    use std::path::PathBuf;
+    use std::io;
+    use std::path::{Path, PathBuf};
 
-    struct OneInstall;
-    impl DotaLocator for OneInstall {
+    struct SingleInstallLocator;
+    impl DotaLocator for SingleInstallLocator {
         fn locate(&self) -> LocatorResult {
             let library = PathBuf::from("/lib");
             LocatorResult {
@@ -65,32 +66,81 @@ mod tests {
         }
     }
 
-    struct Running(bool);
-    impl ProcessProbe for Running {
+    struct FixedProcessProbe(bool);
+    impl ProcessProbe for FixedProcessProbe {
         fn dota_running(&self) -> bool {
             self.0
         }
     }
 
-    #[test]
-    fn reports_missing_and_matching_config() {
-        let endpoint = GsiEndpoint {
-            port: 53000,
-            token: "t".into(),
-        };
-        let files = MemoryFiles::default();
+    /// Arquivos que sempre falham na leitura, como uma pasta sem permissão.
+    struct UnreadableFiles;
+    impl ConfigFiles for UnreadableFiles {
+        fn read(&self, _path: &Path) -> io::Result<Option<String>> {
+            Err(io::ErrorKind::PermissionDenied.into())
+        }
+        fn ensure_dir(&self, _dir: &Path) -> io::Result<()> {
+            unreachable!("o diagnóstico só lê arquivos")
+        }
+        fn write(&self, _path: &Path, _contents: &str) -> io::Result<()> {
+            unreachable!("o diagnóstico só lê arquivos")
+        }
+        fn backup(&self, _path: &Path) -> io::Result<PathBuf> {
+            unreachable!("o diagnóstico só lê arquivos")
+        }
+    }
 
-        let report = run_diagnostics(&OneInstall, &Running(false), &files, &endpoint);
+    fn endpoint() -> GsiEndpoint {
+        GsiEndpoint {
+            port: 53000,
+            token: "token".into(),
+        }
+    }
+
+    #[test]
+    fn reports_missing_config_and_closed_dota() {
+        let report = run_diagnostics(
+            &SingleInstallLocator,
+            &FixedProcessProbe(false),
+            &MemoryFiles::default(),
+            &endpoint(),
+        );
         assert_eq!(report.installs[0].config, GsiConfigState::Missing);
         assert!(!report.dota_process_running);
+    }
 
-        let path = report.installs[0].config_path.clone();
-        files.put(&path, &gsi_config::render(&endpoint));
-        let report = run_diagnostics(&OneInstall, &Running(true), &files, &endpoint);
+    #[test]
+    fn reports_matching_config_and_running_dota() {
+        let files = MemoryFiles::default();
+        let config_path = DotaInstall::game_root_for(Path::new("/lib"))
+            .join("game/dota/cfg/gamestate_integration")
+            .join(gsi_config::CONFIG_FILE_NAME);
+        files.put(&config_path, &gsi_config::render(&endpoint()));
+
+        let report = run_diagnostics(
+            &SingleInstallLocator,
+            &FixedProcessProbe(true),
+            &files,
+            &endpoint(),
+        );
         assert_eq!(
             report.installs[0].config,
             GsiConfigState::Present(ConfigMatch::Matches)
         );
         assert!(report.dota_process_running);
+    }
+
+    #[test]
+    fn reports_unreadable_config_when_read_fails() {
+        let report = run_diagnostics(
+            &SingleInstallLocator,
+            &FixedProcessProbe(false),
+            &UnreadableFiles,
+            &endpoint(),
+        );
+        assert!(matches!(
+            report.installs[0].config,
+            GsiConfigState::Unreadable(_)
+        ));
     }
 }
