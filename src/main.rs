@@ -7,6 +7,10 @@ mod gsi;
 mod infrastructure;
 mod presentation;
 
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

@@ -73,7 +73,7 @@ Antes de escrever uma função, tipo, widget ou teste auxiliar novo, procure se 
    - **application/ports**: acesso ao sistema já abstraído (Steam, processos, arquivos, conexão GSI);
    - **presentation/widgets**: linhas de status, títulos de seção, listas e formatação de horário;
    - **presentation/i18n**: tradução e substituição de valores em textos;
-   - **test_support** dos casos de uso: fakes de ports para testes.
+   - **tests/support**: fakes de ports para os testes unitários.
 3. Se algo parecido existe, use-o ou estenda-o. Não crie uma segunda versão.
 4. Se a mesma lógica aparece em dois lugares, extraia para um ponto único no mesmo commit.
 5. Não crie abstrações para usos hipotéticos. Extraia quando houver pelo menos dois usos reais.

@@ -109,7 +109,7 @@ O nome do teste diz o que está sendo verificado, para que a saída do `cargo te
 
 ## Organização
 
-A organização aprovada separa a implementação dos testes em arquivos distintos. A migração ainda não foi realizada: atualmente os testes unitários estão em blocos internos de `src/`, e `tests/` contém apenas uma fixture.
+A implementação e os testes ficam em arquivos distintos.
 
 | Tipo                         | Local definido                                                    | Como                                                                                                     |
 | ---------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -125,7 +125,8 @@ Por exemplo, `src/domain/keyvalues.rs` corresponde a `tests/unit/domain/keyvalue
 
 Regras de ligação e compilação:
 
-- O arquivo de produção mantém somente a declaração do módulo de testes com `#[cfg(test)]` e `#[path = "..."]`, apontando para o arquivo espelhado. O caminho é relativo ao arquivo que declara o módulo.
+- O arquivo de produção mantém somente a declaração do módulo de testes com `#[cfg(test)]` e `#[path = "..."]`, apontando para o arquivo espelhado. O caminho é relativo à pasta do arquivo que declara o módulo e precisa ser um texto literal: o `#[path]` não aceita macros como `env!`.
+- Fixtures são lidas a partir da raiz do projeto, com `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/..."))`, para não depender da pasta do teste.
 - O arquivo espelhado é um módulo filho e pode acessar itens privados do pai por `super`. Não torne funções públicas apenas para testá-las.
 - Corpos de testes, fakes e auxiliares ficam fora de `src/` e não entram no binário de produção.
 - O Cargo descobre arquivos `.rs` diretamente na raiz de `tests/` como executáveis independentes. Os arquivos nas subpastas precisam ser declarados pelos respectivos módulos ou pontos de entrada; movê-los sem registrar não executa os testes.
