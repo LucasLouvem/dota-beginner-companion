@@ -7,15 +7,18 @@ use std::sync::Arc;
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::error::SendError;
 
-use crate::application::event_bus::{RejectReason, UiCommand};
+use crate::application::diagnostics::{DiagnosticReport, GsiConfigState, InstallCheck};
+use crate::application::error::{Redactor, ToDiagnostic, log_error};
+use crate::application::event_bus::{CoreConnectionError, RejectReason, UiCommand};
 use crate::application::state::{
     AppSnapshot, ConnectionTest, GsiLogStatus, InstallOutcome, ReceivedEvent, ServerState,
 };
-use crate::domain::diagnostics::{DiagnosticReport, GsiConfigState};
-use crate::domain::gsi_config::ConfigMatch;
 use crate::presentation::i18n::{translate, translate_with};
-use crate::presentation::widgets::{Level, boxed_list, format_time, section_title, status_row};
+use crate::presentation::widgets::{
+    Level, boxed_list, diagnostic_row, format_time, section_title, status_row,
+};
 
 /// Sem evento do Dota há mais tempo que isso (heartbeat é 30 s), não
 /// consideramos a conexão ativa.
@@ -27,16 +30,31 @@ pub struct DiagnosticsPage {
     snapshot: AppSnapshot,
     handled_install: u64,
     shown_raw: Option<Arc<str>>,
+    /// Falha de comunicação com o núcleo. Fica na própria página porque o
+    /// canal que falhou não pode trazer o aviso.
+    core_failure: Option<CoreConnectionError>,
 }
 
 /// Mensagens recebidas pela página Diagnóstico.
 #[derive(Debug)]
 pub enum DiagnosticsMessage {
     Snapshot(Box<AppSnapshot>),
+    /// O núcleo parou de publicar o estado.
+    CoreStopped,
     Run,
     Test,
     Install,
     ConfirmOverwrite,
+}
+
+/// Envia o comando ao núcleo. O canal só fecha se o núcleo parou.
+pub fn send_command(
+    commands: &UnboundedSender<UiCommand>,
+    command: UiCommand,
+) -> Result<(), CoreConnectionError> {
+    commands
+        .send(command)
+        .map_err(|SendError(command)| CoreConnectionError::CommandRejected { command })
 }
 
 /// Widgets da página Diagnóstico reconstruídos a cada novo estado.
@@ -180,6 +198,7 @@ impl Component for DiagnosticsPage {
             snapshot: AppSnapshot::default(),
             handled_install: 0,
             shown_raw: None,
+            core_failure: None,
         };
         let widgets = DiagnosticsWidgets {
             install_button,
@@ -212,22 +231,31 @@ impl Component for DiagnosticsPage {
                 }
                 self.render(widgets);
             }
-            DiagnosticsMessage::Run => self.send(UiCommand::RunDiagnostics),
-            DiagnosticsMessage::Test => self.send(UiCommand::TestConnection),
+            DiagnosticsMessage::CoreStopped => {
+                self.report_core_failure(widgets, CoreConnectionError::StateClosed);
+            }
+            DiagnosticsMessage::Run => self.send(widgets, UiCommand::RunDiagnostics),
+            DiagnosticsMessage::Test => self.send(widgets, UiCommand::TestConnection),
             DiagnosticsMessage::Install => {
                 if let Some(root) = self.first_library() {
-                    self.send(UiCommand::InstallGsiConfig {
-                        install_root: root,
-                        overwrite: false,
-                    });
+                    self.send(
+                        widgets,
+                        UiCommand::InstallGsiConfig {
+                            install_root: root,
+                            overwrite: false,
+                        },
+                    );
                 }
             }
             DiagnosticsMessage::ConfirmOverwrite => {
                 if let Some(root) = self.first_library() {
-                    self.send(UiCommand::InstallGsiConfig {
-                        install_root: root,
-                        overwrite: true,
-                    });
+                    self.send(
+                        widgets,
+                        UiCommand::InstallGsiConfig {
+                            install_root: root,
+                            overwrite: true,
+                        },
+                    );
                 }
             }
         }
@@ -235,8 +263,26 @@ impl Component for DiagnosticsPage {
 }
 
 impl DiagnosticsPage {
-    fn send(&self, command: UiCommand) {
-        let _ = self.commands.send(command);
+    fn send(&mut self, widgets: &DiagnosticsWidgets, command: UiCommand) {
+        if let Err(core_error) = send_command(&self.commands, command) {
+            self.report_core_failure(widgets, core_error);
+        }
+    }
+
+    /// Mostra a falha de comunicação com o núcleo, mantendo a primeira.
+    fn report_core_failure(
+        &mut self,
+        widgets: &DiagnosticsWidgets,
+        core_error: CoreConnectionError,
+    ) {
+        if self.core_failure.is_none() {
+            log_error(
+                &core_error.to_diagnostic(&self.snapshot.redactor),
+                "user interface lost the connection to the core",
+            );
+            self.core_failure = Some(core_error);
+        }
+        self.render(widgets);
     }
 
     fn first_library(&self) -> Option<PathBuf> {
@@ -259,6 +305,11 @@ impl DiagnosticsPage {
         ));
 
         widgets.dota_list.remove_all();
+        if let Some(interrupted) = &snapshot.diagnostics_interrupted {
+            widgets.dota_list.append(&diagnostic_row(
+                &interrupted.to_diagnostic(&snapshot.redactor),
+            ));
+        }
         match &snapshot.diagnostics {
             None => {
                 widgets
@@ -266,16 +317,23 @@ impl DiagnosticsPage {
                     .append(&status_row(Level::Info, &translate("Verificando…"), ""))
             }
             Some(report) => {
-                for row in dota_rows(report) {
+                for row in dota_rows(report, &snapshot.redactor) {
                     widgets.dota_list.append(&row);
                 }
             }
         }
         if let Some(outcome) = &snapshot.last_install {
-            widgets.dota_list.append(&install_row(outcome));
+            widgets
+                .dota_list
+                .append(&install_row(outcome, &snapshot.redactor));
         }
 
         widgets.server_list.remove_all();
+        if let Some(core_failure) = &self.core_failure {
+            widgets.server_list.append(&diagnostic_row(
+                &core_failure.to_diagnostic(&snapshot.redactor),
+            ));
+        }
         for row in server_rows(snapshot) {
             widgets.server_list.append(&row);
         }
@@ -309,7 +367,7 @@ fn latest_event(snapshot: &AppSnapshot) -> Option<(&ReceivedEvent, bool)> {
     }
 }
 
-fn dota_rows(report: &DiagnosticReport) -> Vec<adw::ActionRow> {
+fn dota_rows(report: &DiagnosticReport, redactor: &Redactor) -> Vec<adw::ActionRow> {
     let mut rows = Vec::new();
     rows.push(if report.dota_process_running {
         status_row(
@@ -360,46 +418,40 @@ fn dota_rows(report: &DiagnosticReport) -> Vec<adw::ActionRow> {
             &format!("{} ({kind})", install.game_root.display()),
         ));
 
-        let path = check.config_path.display().to_string();
-        let (level, title, detail) = match &check.config {
-            GsiConfigState::Missing => (
-                Level::Warning,
-                translate("Arquivo GSI não instalado"),
-                translate_with("{} — use \"Instalar configuração GSI\".", &[&path]),
-            ),
-            GsiConfigState::Present(ConfigMatch::Matches) => {
-                (Level::Ok, translate("Arquivo GSI instalado"), path)
-            }
-            GsiConfigState::Present(ConfigMatch::UriMismatch { found }) => (
-                Level::Warning,
-                translate("Arquivo GSI aponta para outro endereço"),
-                translate_with(
-                    "{} — encontrado: {}. Reinstale para usar a porta atual.",
-                    &[&path, found.as_deref().unwrap_or("?")],
-                ),
-            ),
-            GsiConfigState::Present(ConfigMatch::TokenMismatch) => (
-                Level::Warning,
-                translate("Token do arquivo GSI diferente do aplicativo"),
-                translate_with("{} — reinstale para atualizar o token.", &[&path]),
-            ),
-            GsiConfigState::Present(ConfigMatch::Unparsable(parse_error)) => (
-                Level::Error,
-                translate("Arquivo GSI inválido"),
-                format!("{path} — {parse_error}"),
-            ),
-            GsiConfigState::Unreadable(read_error) => (
-                Level::Error,
-                translate("Não foi possível ler o arquivo GSI"),
-                format!("{path} — {read_error}"),
-            ),
-        };
-        rows.push(status_row(level, &title, &detail));
+        rows.push(config_row(check, redactor));
     }
     rows
 }
 
-fn install_row(outcome: &InstallOutcome) -> adw::ActionRow {
+fn config_row(check: &InstallCheck, redactor: &Redactor) -> adw::ActionRow {
+    let path = check.config_path.display().to_string();
+    match &check.config {
+        GsiConfigState::Missing => status_row(
+            Level::Warning,
+            &translate("Arquivo GSI não instalado"),
+            &translate_with("{} — use \"Instalar configuração GSI\".", &[&path]),
+        ),
+        GsiConfigState::Matches => {
+            status_row(Level::Ok, &translate("Arquivo GSI instalado"), &path)
+        }
+        GsiConfigState::UriMismatch { found } => status_row(
+            Level::Warning,
+            &translate("Arquivo GSI aponta para outro endereço"),
+            &translate_with(
+                "{} — encontrado: {}. Reinstale para usar a porta atual.",
+                &[&path, found.as_deref().unwrap_or("?")],
+            ),
+        ),
+        GsiConfigState::TokenMismatch => status_row(
+            Level::Warning,
+            &translate("Token do arquivo GSI diferente do aplicativo"),
+            &translate_with("{} — reinstale para atualizar o token.", &[&path]),
+        ),
+        GsiConfigState::Failed(file_error) => diagnostic_row(&file_error.to_diagnostic(redactor)),
+    }
+}
+
+fn install_row(outcome: &InstallOutcome, redactor: &Redactor) -> adw::ActionRow {
     match outcome {
         InstallOutcome::Created(path) => status_row(
             Level::Ok,
@@ -430,11 +482,12 @@ fn install_row(outcome: &InstallOutcome) -> adw::ActionRow {
                 &[&path.display().to_string()],
             ),
         ),
-        InstallOutcome::Failed { path, error } => status_row(
-            Level::Error,
-            &translate("Falha ao instalar o arquivo GSI"),
-            &format!("{} — {error}", path.display()),
-        ),
+        InstallOutcome::Failed(install_error) => {
+            diagnostic_row(&install_error.to_diagnostic(redactor))
+        }
+        InstallOutcome::Interrupted(interrupted) => {
+            diagnostic_row(&interrupted.to_diagnostic(redactor))
+        }
     }
 }
 
@@ -449,14 +502,9 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
             &translate_with("Servidor ouvindo em {}", &[&address.to_string()]),
             &translate("Aceita apenas conexões deste computador e com o token correto."),
         ),
-        ServerState::Failed(server_error) => status_row(
-            Level::Error,
-            &translate("Servidor local não iniciou"),
-            &translate_with(
-                "{} — a porta pode estar em uso. Altere gsi_port na configuração e reinstale o arquivo GSI.",
-                &[server_error],
-            ),
-        ),
+        ServerState::Failed(server_error) => {
+            diagnostic_row(&server_error.to_diagnostic(&snapshot.redactor))
+        }
     }];
 
     rows.push(match &gsi.last_dota_event {
@@ -492,7 +540,7 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
     });
 
     if let Some(log_status) = &snapshot.gsi_log {
-        rows.push(gsi_log_row(log_status));
+        rows.push(gsi_log_row(log_status, &snapshot.redactor));
     }
 
     if let Some((at, reason)) = gsi.last_rejection {
@@ -517,18 +565,22 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
             &translate("Teste de conexão bem-sucedido"),
             &translate("O servidor local recebeu o evento de teste. Isso não confirma que o Dota está enviando dados."),
         )),
-        Some(ConnectionTest::Failed(reason)) => rows.push(status_row(
-            Level::Error,
-            &translate("Teste de conexão falhou"),
-            reason,
-        )),
+        Some(ConnectionTest::Failed(test_error)) => {
+            rows.push(diagnostic_row(&test_error.to_diagnostic(&snapshot.redactor)))
+        }
+        Some(ConnectionTest::Interrupted(interrupted)) => {
+            rows.push(diagnostic_row(&interrupted.to_diagnostic(&snapshot.redactor)))
+        }
     }
     rows
 }
 
-fn gsi_log_row(log_status: &GsiLogStatus) -> adw::ActionRow {
+fn gsi_log_row(log_status: &GsiLogStatus, redactor: &Redactor) -> adw::ActionRow {
+    if let Some(stopped) = &log_status.stopped {
+        return diagnostic_row(&stopped.to_diagnostic(redactor));
+    }
     let log_path = log_status.path.display().to_string();
-    match log_status.last_error {
+    match &log_status.last_error {
         None => status_row(
             Level::Info,
             &translate_with(
@@ -540,11 +592,7 @@ fn gsi_log_row(log_status: &GsiLogStatus) -> adw::ActionRow {
                 &[&log_path],
             ),
         ),
-        Some(record_error) => status_row(
-            Level::Error,
-            &translate("Falha ao gravar o log de eventos GSI"),
-            &format!("{log_path} — {record_error}"),
-        ),
+        Some(record_error) => diagnostic_row(&record_error.to_diagnostic(redactor)),
     }
 }
 
@@ -570,3 +618,7 @@ fn confirm_overwrite(
     });
     dialog.present(Some(root));
 }
+
+#[cfg(test)]
+#[path = "../../../tests/unit/presentation/pages/diagnostics_tests.rs"]
+mod tests;

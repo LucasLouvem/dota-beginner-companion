@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use relm4::adw::prelude::*;
 use relm4::{adw, gtk};
 
-use super::i18n::{translate, translate_with};
+use crate::application::error::Diagnostic;
+
+use super::i18n::{translate, translate_text, translate_with};
 
 /// Gravidade de uma linha de status.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,40 @@ pub fn status_row(level: Level, title: &str, subtitle: &str) -> adw::ActionRow {
     image.set_tooltip_text(Some(&tooltip));
     row.add_prefix(&image);
     row
+}
+
+/// Linha de erro de um diagnóstico: título, causa e resolução, código e
+/// detalhes técnicos, todos selecionáveis para copiar.
+pub fn diagnostic_row(diagnostic: &Diagnostic) -> adw::ActionRow {
+    status_row(
+        Level::Error,
+        &translate_text(&diagnostic.title),
+        &diagnostic_subtitle(diagnostic),
+    )
+}
+
+/// Diagnóstico completo em texto, com o título na primeira linha, para o terminal.
+pub fn diagnostic_text(diagnostic: &Diagnostic) -> String {
+    format!(
+        "{}\n{}",
+        translate_text(&diagnostic.title),
+        diagnostic_subtitle(diagnostic)
+    )
+}
+
+fn diagnostic_subtitle(diagnostic: &Diagnostic) -> String {
+    let mut lines = vec![
+        format!(
+            "{} {}",
+            translate_text(&diagnostic.cause),
+            translate_text(&diagnostic.resolution)
+        ),
+        translate_with("Código: {}", &[diagnostic.code.as_str()]),
+    ];
+    if let Some(details) = &diagnostic.technical_details {
+        lines.push(translate_with("Detalhes técnicos: {}", &[details]));
+    }
+    lines.join("\n")
 }
 
 /// Título de seção de uma página.
@@ -78,3 +114,7 @@ pub fn format_time(at: SystemTime) -> String {
     };
     format!("{clock} ({relative})")
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/presentation/widgets_tests.rs"]
+mod tests;

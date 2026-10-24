@@ -24,13 +24,13 @@ impl ConfigFiles for LocalConfigFiles {
     }
 
     /// Escreve em arquivo temporário e renomeia, para nunca deixar um `.cfg`
-    /// pela metade.
+    /// pela metade. Se algo falhar, o temporário é removido e o erro
+    /// devolvido é sempre o da gravação ou da renomeação.
     fn write(&self, path: &Path, contents: &str) -> io::Result<()> {
         let partial_path = path.with_extension("cfg.tmp");
-        fs::write(&partial_path, contents)?;
-        fs::rename(&partial_path, path).inspect_err(|_| {
-            let _ = fs::remove_file(&partial_path);
-        })
+        fs::write(&partial_path, contents)
+            .and_then(|()| fs::rename(&partial_path, path))
+            .inspect_err(|_| discard_partial(&partial_path))
     }
 
     fn backup(&self, path: &Path) -> io::Result<PathBuf> {
@@ -47,6 +47,22 @@ impl ConfigFiles for LocalConfigFiles {
         }
         fs::copy(path, &backup)?;
         Ok(backup)
+    }
+}
+
+/// Remove o temporário de uma gravação que falhou. Uma falha aqui é
+/// secundária: vai para o log, sem substituir o erro principal. O log leva
+/// só o nome do arquivo, porque o caminho completo inclui o nome do usuário.
+fn discard_partial(partial_path: &Path) {
+    match fs::remove_file(partial_path) {
+        Ok(()) => {}
+        // O temporário nem chegou a ser criado.
+        Err(io_error) if io_error.kind() == io::ErrorKind::NotFound => {}
+        Err(cleanup_error) => tracing::warn!(
+            file = %partial_path.file_name().unwrap_or_default().to_string_lossy(),
+            error = %cleanup_error,
+            "could not remove partial GSI config file"
+        ),
     }
 }
 

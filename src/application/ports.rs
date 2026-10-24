@@ -1,13 +1,17 @@
 //! Interfaces que os adaptadores (infraestrutura, GSI, providers) implementam.
 
+use std::error::Error;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
+
+use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
 
 /// Future com tipo apagado, para traits assíncronas usadas como `dyn`.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -39,17 +43,149 @@ pub trait ConfigFiles: Send + Sync {
 }
 
 /// Falha ao gravar um evento GSI no arquivo de log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum GsiRecordError {
-    #[error("não foi possível abrir ou gravar o arquivo ({0})")]
-    Write(io::ErrorKind),
+    #[error("não foi possível abrir ou gravar {}", path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: Arc<io::Error>,
+    },
     #[error("o evento recebido não é um JSON válido")]
-    InvalidPayload,
+    InvalidPayload {
+        #[source]
+        source: SharedError,
+    },
+}
+
+impl ToDiagnostic for GsiRecordError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        let title = UiText::new("Falha ao gravar o log de eventos GSI");
+        let (code, cause, resolution) = match self {
+            GsiRecordError::Write { path, source } => {
+                let path = path.display().to_string();
+                match source.kind() {
+                    io::ErrorKind::NotFound => (
+                        DiagnosticCode::GsiLogDirectoryMissing,
+                        UiText::with("A pasta de {} não existe.", [path]),
+                        "Crie a pasta ou altere DOTA_COMPANION_GSI_LOG; o aplicativo continua \
+                         funcionando.",
+                    ),
+                    io::ErrorKind::PermissionDenied => (
+                        DiagnosticCode::GsiLogPermissionDenied,
+                        UiText::with("Sem permissão para gravar {}.", [path]),
+                        "Corrija a permissão do arquivo ou da pasta; o aplicativo continua \
+                         funcionando.",
+                    ),
+                    _ => {
+                        return Diagnostic::unclassified(
+                            title,
+                            format!("Falha ao gravar {path}."),
+                            self,
+                            redactor,
+                        );
+                    }
+                }
+            }
+            GsiRecordError::InvalidPayload { .. } => (
+                DiagnosticCode::GsiLogInvalidPayload,
+                UiText::new("O evento recebido não é um JSON válido e não foi gravado."),
+                "Nenhuma ação é necessária; os próximos eventos válidos continuam sendo gravados.",
+            ),
+        };
+        Diagnostic {
+            code,
+            title,
+            cause,
+            resolution: UiText::new(resolution),
+            technical_details: Some(technical_details(self, redactor)),
+        }
+    }
 }
 
 /// Grava os eventos GSI recebidos do Dota, em ordem de chegada.
 pub trait GsiRecorder: Send + Sync {
     fn record(&self, received_at: SystemTime, raw: &str) -> Result<(), GsiRecordError>;
+}
+
+/// Erro de origem de um adaptador, guardado sem expor a crate que o gerou.
+pub type SharedError = Arc<dyn Error + Send + Sync>;
+
+/// Motivo de o teste de conexão com o servidor GSI local ter falhado.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ConnectionTestError {
+    #[error("o servidor GSI local não aceitou a conexão")]
+    Unreachable {
+        #[source]
+        source: SharedError,
+    },
+    #[error("o servidor GSI local não respondeu a tempo")]
+    TimedOut {
+        #[source]
+        source: SharedError,
+    },
+    #[error("o servidor GSI recusou o token do evento de teste")]
+    TokenRejected,
+    #[error("o servidor GSI recusou o conteúdo do evento de teste")]
+    PayloadRejected,
+    #[error("resposta inesperada do servidor GSI ({details})")]
+    UnexpectedResponse { details: String },
+    #[error("não foi possível enviar o evento de teste")]
+    Request {
+        #[source]
+        source: SharedError,
+    },
+}
+
+impl ToDiagnostic for ConnectionTestError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        let title = UiText::new("Teste de conexão falhou");
+        let (code, cause, resolution) = match self {
+            ConnectionTestError::Unreachable { .. } => (
+                DiagnosticCode::ConnectionTestUnreachable,
+                "O servidor GSI local não aceitou a conexão.",
+                "Verifique no Diagnóstico se o servidor local está ouvindo.",
+            ),
+            ConnectionTestError::TimedOut { .. } => (
+                DiagnosticCode::ConnectionTestTimedOut,
+                "O servidor GSI local não respondeu a tempo.",
+                "Verifique no Diagnóstico se o servidor local está ouvindo e tente de novo.",
+            ),
+            ConnectionTestError::TokenRejected => (
+                DiagnosticCode::ConnectionTestTokenRejected,
+                "O servidor na porta configurada recusou o token do aplicativo.",
+                "Verifique se a porta gsi_port não está sendo usada por outro programa.",
+            ),
+            ConnectionTestError::PayloadRejected => (
+                DiagnosticCode::ConnectionTestPayloadRejected,
+                "O servidor na porta configurada recusou o evento de teste.",
+                "Verifique se a porta gsi_port não está sendo usada por outro programa.",
+            ),
+            ConnectionTestError::UnexpectedResponse { .. } => {
+                return Diagnostic::unclassified(
+                    title,
+                    "O servidor GSI respondeu de forma inesperada.",
+                    self,
+                    redactor,
+                );
+            }
+            ConnectionTestError::Request { .. } => {
+                return Diagnostic::unclassified(
+                    title,
+                    "O evento de teste não pôde ser enviado.",
+                    self,
+                    redactor,
+                );
+            }
+        };
+        Diagnostic {
+            code,
+            title,
+            cause: UiText::new(cause),
+            resolution: UiText::new(resolution),
+            technical_details: Some(technical_details(self, redactor)),
+        }
+    }
 }
 
 /// Verifica se o servidor GSI local aceita eventos.
@@ -58,5 +194,9 @@ pub trait ConnectionTester: Send + Sync {
     fn send_test_event<'a>(
         &'a self,
         endpoint: &'a GsiEndpoint,
-    ) -> BoxFuture<'a, Result<(), String>>;
+    ) -> BoxFuture<'a, Result<(), ConnectionTestError>>;
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/application/ports_tests.rs"]
+mod tests;

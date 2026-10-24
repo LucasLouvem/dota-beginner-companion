@@ -66,8 +66,8 @@
 
 **Em aberto:**
 
-- `cargo test` e `cargo clippy` passam; falta verificar a janela (`cargo run`), o POST manual, o `ss -ltn` e a partida com o Dota.
-- O código ainda não segue [ERRORS](../docs/ERRORS.md) (há erros como `String`) e [CODE_COMMENTS](../docs/CODE_COMMENTS.md) (comentários e textos que citam fases futuras).
+- Os resultados mínimos foram verificados com o jogo real: janela, POST com token certo e errado, `ss -ltn` e partidas contra bots.
+- O código ainda não segue [CODE_COMMENTS](../docs/CODE_COMMENTS.md) em dois pontos que citam o futuro: o comentário de `application/ports.rs` menciona providers, e as abas ainda vazias mostram "Disponível na Fase N do projeto.".
 - O uso de `unsafe` para `setlocale` precisa de aprovação.
 - Faltam `scripts/dev.sh` e `scripts/send_test_event.sh`?
 
@@ -165,3 +165,5 @@
 - 2026-10-24 — Fase 0 concluída: resultados mínimos verificados.
 - 2026-10-24 — Fase 1 marcada como atual.
 - 2026-10-24 — Verificação de formatação e escrita (dprint, rumdl, typos) adicionada às decisões da Fase 0.
+- 2026-10-24 — Fase 1: o código passa a seguir o contrato central de diagnóstico ([ERRORS](../docs/ERRORS.md)) e a organização de testes ([TESTING](../docs/TESTING.md)), com testes unitários em `tests/unit/`, `src/lib.rs` e testes de integração. O relatório de diagnóstico passa do `domain` para a `application`.
+- 2026-10-24 — Fase 1: falhas antes ignoradas passam a ser tratadas. O `.env` é lido sem alterar o ambiente e impede a inicialização se for inválido; as tarefas do núcleo e o gravador de eventos informam interrupções; canais fechados geram 503 no servidor e aviso na interface; tradução e limpeza de temporários registram aviso no log.

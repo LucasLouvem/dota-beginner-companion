@@ -2,6 +2,8 @@
 //! traits definidas em `ports`.
 
 pub mod core;
+pub mod diagnostics;
+pub mod error;
 pub mod event_bus;
 pub mod ports;
 pub mod state;

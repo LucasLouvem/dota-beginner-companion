@@ -4,7 +4,7 @@
 //! `game/dota/cfg/gamestate_integration/` e envia POSTs JSON para a `uri` de
 //! cada um.
 
-use super::keyvalues::{self, KeyValue};
+use super::keyvalues::{self, KeyValue, KeyValuesError};
 
 /// Nome do arquivo `.cfg` criado por este aplicativo.
 pub const CONFIG_FILE_NAME: &str = "gamestate_integration_dota_companion.cfg";
@@ -67,21 +67,32 @@ pub enum ConfigMatch {
         found: Option<String>,
     },
     TokenMismatch,
-    Unparsable(String),
+    Unparsable(GsiConfigParseError),
+}
+
+/// Motivo de um `.cfg` do GSI não poder ser interpretado.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GsiConfigParseError {
+    #[error("o conteúdo não é KeyValues válido")]
+    KeyValues(#[source] KeyValuesError),
+    #[error("nenhuma seção encontrada")]
+    MissingSection,
 }
 
 /// Compara um arquivo existente com o que o aplicativo espera.
 pub fn inspect(contents: &str, expected: &GsiEndpoint) -> ConfigMatch {
     let root = match keyvalues::parse(contents) {
         Ok(root) => root,
-        Err(parse_error) => return ConfigMatch::Unparsable(parse_error.to_string()),
+        Err(parse_error) => {
+            return ConfigMatch::Unparsable(GsiConfigParseError::KeyValues(parse_error));
+        }
     };
     let Some((_, section)) = root
         .entries()
         .iter()
         .find(|(_, value)| matches!(value, KeyValue::Section(_)))
     else {
-        return ConfigMatch::Unparsable("nenhuma seção encontrada".into());
+        return ConfigMatch::Unparsable(GsiConfigParseError::MissingSection);
     };
 
     let uri = section.get("uri").and_then(KeyValue::as_text);

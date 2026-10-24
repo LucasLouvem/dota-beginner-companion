@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::application::state::InstallOutcome;
-use crate::application::use_cases::install_gsi_config::install_gsi_config;
+use crate::application::use_cases::install_gsi_config::{InstallError, install_gsi_config};
 use crate::domain::gsi_config::GsiEndpoint;
 use std::os::unix::fs::PermissionsExt;
 
@@ -19,6 +19,63 @@ fn temporary_files_in(dir: &Path) -> usize {
         .flatten()
         .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
         .count()
+}
+
+#[test]
+fn returns_rename_error_and_removes_temporary_file_when_target_is_a_directory() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let target = temp_dir.path().join("gsi.cfg");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("keep"), "").unwrap();
+
+    let write_error = LocalConfigFiles.write(&target, "conteúdo").unwrap_err();
+
+    assert!(
+        matches!(
+            write_error.kind(),
+            io::ErrorKind::IsADirectory | io::ErrorKind::DirectoryNotEmpty
+        ),
+        "{write_error:?}"
+    );
+    assert_eq!(temporary_files_in(temp_dir.path()), 0);
+    assert!(target.join("keep").exists());
+}
+
+#[test]
+fn logs_cleanup_failure_without_full_path_and_keeps_going() {
+    let (_guard, logs) = crate::test_support::capture_logs();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let locked_dir = temp_dir.path().join("locked");
+    fs::create_dir(&locked_dir).unwrap();
+    let partial_path = locked_dir.join("gsi.cfg.tmp");
+    fs::write(&partial_path, "parcial").unwrap();
+    fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o500)).unwrap();
+    if fs::remove_file(&partial_path).is_ok() {
+        // Executando como root: permissões não se aplicam.
+        return;
+    }
+
+    discard_partial(&partial_path);
+
+    fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let log_text = logs.text();
+    assert!(log_text.contains("WARN"), "{log_text}");
+    assert!(log_text.contains("file=gsi.cfg.tmp"), "{log_text}");
+    assert!(
+        !log_text.contains(&temp_dir.path().display().to_string()),
+        "{log_text}"
+    );
+    assert!(partial_path.exists());
+}
+
+#[test]
+fn ignores_missing_temporary_file_during_cleanup() {
+    let (_guard, logs) = crate::test_support::capture_logs();
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    discard_partial(&temp_dir.path().join("missing.cfg.tmp"));
+
+    assert_eq!(logs.text(), "");
 }
 
 #[test]
@@ -58,9 +115,10 @@ fn fails_with_path_when_directory_is_not_writable() {
         return;
     }
     let outcome = install_gsi_config(&LocalConfigFiles, temp_dir.path(), &endpoint(), false);
-    assert!(
-        matches!(outcome, InstallOutcome::Failed { .. }),
-        "{outcome:?}"
-    );
     fs::set_permissions(temp_dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let InstallOutcome::Failed(InstallError::CreateDir { dir, source }) = &outcome else {
+        panic!("esperava falha ao criar a pasta, veio {outcome:?}");
+    };
+    assert!(dir.starts_with(temp_dir.path()), "{}", dir.display());
+    assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
 }

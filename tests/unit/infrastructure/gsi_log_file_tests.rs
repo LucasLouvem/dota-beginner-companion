@@ -45,21 +45,32 @@ fn creates_log_file_readable_only_by_owner() {
 }
 
 #[test]
-fn fails_with_write_error_when_directory_does_not_exist() {
+fn fails_with_write_error_and_path_when_directory_does_not_exist() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let recorder = JsonLinesGsiRecorder::new(temp_dir.path().join("missing/gsi.jsonl"));
-    assert_eq!(
-        recorder.record(SystemTime::now(), "{}"),
-        Err(GsiRecordError::Write(io::ErrorKind::NotFound))
-    );
+    let log_path = temp_dir.path().join("missing/gsi.jsonl");
+    let recorder = JsonLinesGsiRecorder::new(log_path.clone());
+
+    let result = recorder.record(SystemTime::now(), "{}");
+    let Err(GsiRecordError::Write { path, source }) = &result else {
+        panic!("esperava erro de gravação: {result:?}");
+    };
+    assert_eq!(path, &log_path);
+    assert_eq!(source.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
-fn fails_with_invalid_payload_when_text_is_not_json() {
+fn fails_with_invalid_payload_and_writes_nothing_when_text_is_not_json() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let recorder = JsonLinesGsiRecorder::new(temp_dir.path().join("gsi.jsonl"));
-    assert_eq!(
-        recorder.record(SystemTime::now(), "not json"),
-        Err(GsiRecordError::InvalidPayload)
-    );
+    let log_path = temp_dir.path().join("gsi.jsonl");
+    let recorder = JsonLinesGsiRecorder::new(log_path.clone());
+
+    let result = recorder.record(SystemTime::now(), "not json");
+    let Err(GsiRecordError::InvalidPayload { source }) = &result else {
+        panic!("esperava payload inválido: {result:?}");
+    };
+    let parse_error = source
+        .downcast_ref::<serde_json::Error>()
+        .expect("a causa é o erro original do serde_json");
+    assert_eq!(parse_error.classify(), serde_json::error::Category::Syntax);
+    assert!(!log_path.exists());
 }

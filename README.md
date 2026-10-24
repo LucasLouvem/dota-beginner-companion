@@ -56,11 +56,14 @@ Arquivo `~/.config/dota-companion/config.toml`. Ele é criado na primeira execu�
 | `gsi_token`       | gerado automaticamente        | Token que o Dota envia em cada evento      |
 | `extra_libraries` | `["/mnt/jogos/SteamLibrary"]` | Bibliotecas Steam fora dos caminhos padrão |
 
-As variáveis de ambiente abaixo têm prioridade sobre o arquivo. Elas também podem ficar em um `.env` no diretório de execução.
+As variáveis de ambiente abaixo têm prioridade sobre o arquivo. Elas também podem ficar em um `.env` no diretório de execução (veja o `.env.example`). Uma variável definida no ambiente vale mais que a do `.env`.
 
 - `DOTA_COMPANION_GSI_PORT`: porta do servidor.
 - `DOTA_COMPANION_EXTRA_LIBRARIES`: bibliotecas extras, separadas por `:`.
-- `DOTA_COMPANION_GSI_LOG`: arquivo onde cada evento recebido do Dota é gravado em JSON Lines, para desenvolvimento. Acompanhe com `tail -f logs/gsi.jsonl | jq`. O arquivo contém SteamID e nome do jogador; a pasta `logs/` não é versionada.
+- `DOTA_COMPANION_GSI_LOG`: arquivo onde cada evento recebido do Dota é gravado em JSON Lines, para desenvolvimento. Acompanhe com `tail -f logs/gsi.jsonl | jq`. O arquivo contém SteamID e nome do jogador; a pasta `logs/` não é versionada. Vazio não ativa a gravação.
+- `RUST_LOG`: nível de log (`error`, `warn`, `info`, `debug`, `trace`). Sem valor, o log mostra só erros; um valor inválido também mostra só erros, começando por um que aponta o `RUST_LOG` inválido.
+
+O `.env` é opcional e só é procurado no diretório de execução. Se ele existir e não puder ser lido ou tiver uma linha inválida, o aplicativo não inicia e mostra no terminal a linha e a coluna do problema, sem o conteúdo da linha.
 
 Se mudar a porta ou o token, reinstale o arquivo GSI pelo Diagnóstico.
 

@@ -131,6 +131,9 @@ Regras de ligação e compilação:
 - Corpos de testes, fakes e auxiliares ficam fora de `src/` e não entram no binário de produção.
 - O Cargo descobre arquivos `.rs` diretamente na raiz de `tests/` como executáveis independentes. Os arquivos nas subpastas precisam ser declarados pelos respectivos módulos ou pontos de entrada; movê-los sem registrar não executa os testes.
 - Testes de integração importam a aplicação pela biblioteca em `src/lib.rs` (`dota_companion::...`), que declara as camadas usadas por `main.rs`.
+- Os auxiliares da integração ficam em `tests/integration/harness.rs`, porque importam `dota_companion::`. Os de `tests/support/` usam `crate::` e servem só aos unitários.
+- Para verificar logs, use `capture_logs()` de `tests/support/`. Ele captura o `tracing` da thread do teste, incluindo as tarefas de um `#[tokio::test]`; código em `spawn_blocking` roda em outra thread e fica de fora. Todo teste de falha que registra log confere que segredos simulados não aparecem.
+- Testes não leem o `.env`, o `config.toml` nem as variáveis reais da máquina: use arquivos em diretório temporário e uma busca de variáveis controlada.
 - Integração não é sinônimo de E2E: testar dois componentes conectados não exige iniciar o aplicativo completo.
 
 Por camada:
@@ -140,6 +143,7 @@ Por camada:
 - **gsi**: o router é testado direto com `tower::ServiceExt::oneshot`, sem abrir porta. O bind e o cliente usam servidor real em `127.0.0.1:0`.
 - **infrastructure**: arquivos reais em diretório temporário, incluindo erros de permissão.
 - **presentation**: regras que não dependem de widgets (formatação, traduções) têm teste unitário.
+- **integração**: núcleo real com o servidor GSI em porta livre e arquivos em diretório temporário. Toda espera por uma mudança no `AppSnapshot` tem tempo limite.
 
 ## Comandos
 

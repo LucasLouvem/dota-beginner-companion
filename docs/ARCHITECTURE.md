@@ -25,15 +25,15 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 
 ## Camadas
 
-| Módulo           | Responsabilidade                                                                                                         | Pode depender de        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
-| `domain`         | Regras puras: formato KeyValues/VDF, conteúdo e validação do `.cfg` do GSI, instalação do Dota, relatório de diagnóstico | nada do projeto         |
-| `application`    | Ports, mensagens (`CoreEvent`, `UiCommand`), estado observável (`AppSnapshot`), laço do núcleo e casos de uso            | `domain`                |
-| `gsi`            | Servidor GSI (Axum) e cliente do teste de conexão                                                                        | `domain`, `application` |
-| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos de configuração GSI, `config.toml`                  | `domain`, `application` |
-| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                        | `domain`, `application` |
-| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                     | todos                   |
-| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                     | todos                   |
+| Módulo           | Responsabilidade                                                                                                       | Pode depender de        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `domain`         | Regras puras: formato KeyValues/VDF, conteúdo e validação do `.cfg` do GSI, instalação do Dota                         | nada do projeto         |
+| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso | `domain`                |
+| `gsi`            | Servidor GSI (Axum) e cliente do teste de conexão                                                                      | `domain`, `application` |
+| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos de configuração GSI, `config.toml`                | `domain`, `application` |
+| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                      | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                   | todos                   |
+| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                   | todos                   |
 
 Regras:
 
@@ -51,7 +51,7 @@ Regras:
 | `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                |
 | `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)     |
 
-Nos testes, os casos de uso recebem implementações falsas desses ports.
+Nos testes, os casos de uso recebem implementações falsas desses ports. Os testes unitários ficam em `tests/unit/` e os de integração em `tests/integration/`, conforme [TESTING.md](TESTING.md).
 
 ## Fluxo de eventos
 
@@ -63,12 +63,23 @@ Nos testes, os casos de uso recebem implementações falsas desses ports.
 
 O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo.
 
+## Erros e diagnóstico
+
+- Cada camada tem erros tipados que guardam a causa original. Os que vão para o `AppSnapshot` guardam a causa em `Arc`, para o estado continuar `Clone`.
+- O domínio não conhece o contrato de diagnóstico. A `application` converte os erros dele, e cada erro específico implementa `ToDiagnostic` (`application::error`).
+- A interface converte o erro em `Diagnostic` no momento de exibir, com o `Redactor` do `AppSnapshot`, que remove o token. A mesma linha (`diagnostic_row`) mostra título, causa, resolução, código e detalhes técnicos.
+- Falhas que impedem a inicialização encerram o aplicativo com o mesmo diagnóstico no terminal, sem a cadeia completa do erro.
+- Códigos HTTP só existem no adaptador `gsi`. Detalhes e catálogo em [ERRORS.md](ERRORS.md).
+
 ## Concorrência
 
 - `main.rs` cria um runtime tokio próprio. O servidor GSI e o laço do núcleo rodam nele.
 - A thread do GTK só executa a interface. Ela recebe o estado por `watch` dentro de um comando Relm4.
 - Operações de arquivo e de `/proc` rodam em `spawn_blocking`, e o teste de conexão roda em uma tarefa separada. A interface nunca espera por I/O.
 - Quando o log de eventos está ativo (`DOTA_COMPANION_GSI_LOG`), uma única tarefa grava os eventos do Dota um de cada vez, na ordem de chegada. Eventos de teste e requisições recusadas não são gravados.
+- O núcleo acompanha o fim de cada tarefa (diagnóstico, instalação, teste de conexão e gravação). Se uma delas entrar em pânico ou for cancelada, a interrupção aparece no `AppSnapshot` e no log, sem a mensagem do pânico.
+- O laço do núcleo não termina sozinho; o encerramento normal é o `shutdown_background` do runtime depois que a janela fecha. Por isso, um canal fechado com o aplicativo aberto é sempre falha. O servidor responde 503 quando não consegue entregar um evento aceito, e a interface mostra "O núcleo do aplicativo parou" quando perde o estado ou um comando.
+- O `.env` é lido antes do log e das outras configurações, sem alterar o ambiente do processo: os valores dele só entram pela busca de variáveis usada por `config::load_or_init` e pelo filtro do `RUST_LOG`.
 
 ## Segurança do servidor GSI
 
@@ -82,11 +93,10 @@ O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de te
 
 Decisões de arquitetura já aprovadas que ainda não existem no código. Quando uma delas é implementada, ela sai desta tabela e passa a ser descrita nas seções acima.
 
-| Camada          | Decisão                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`       | Persistência local em SQLite para cache, configurações e histórico de partidas                                                                                                                                                                                                                                                                                                                                                                                |
-| `providers`     | A aplicação depende de uma interface de provider, não de uma API específica. Ordem de leitura: dado novo da API, depois cache vencido marcado como antigo, depois dados embutidos no binário                                                                                                                                                                                                                                                                  |
-| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                                                                                                                                                                                                                                                                                                             |
-| `application`   | Contrato único de diagnóstico em `application/error.rs`, com `code`, `title`, `cause`, `resolution` e `technical_details` opcional. Erros específicos preservam a origem; causas desconhecidas usam `UNCLASSIFIED_ERROR`, conforme [ERRORS.md](ERRORS.md). O domínio permanece independente da aplicação, que converte seus erros para o contrato. A interface renderiza o diagnóstico e códigos HTTP ficam restritos ao adaptador HTTP.                      |
-| Testes          | Unitários fora de `src/`, em `tests/unit/`, espelhando os módulos de produção e vinculados como módulos filhos com `#[cfg(test)]` e `#[path]`. Auxiliares ficam em `tests/support/`. Integração usa `tests/integration_tests.rs` e módulos em `tests/integration/`; E2E usa `tests/e2e_tests.rs`. A API para integração será exposta por `src/lib.rs`, preservando o encapsulamento. Organização e verificação de resultados seguem [TESTING.md](TESTING.md). |
+| Camada          | Decisão                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`       | Persistência local em SQLite para cache, configurações e histórico de partidas                                                                                                               |
+| `providers`     | A aplicação depende de uma interface de provider, não de uma API específica. Ordem de leitura: dado novo da API, depois cache vencido marcado como antigo, depois dados embutidos no binário |
+| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                                      |
+| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                                            |
+| Testes          | Testes ponta a ponta (E2E) em `tests/e2e_tests.rs`, exercitando o aplicativo completo pelas interfaces externas, conforme [TESTING.md](TESTING.md)                                           |

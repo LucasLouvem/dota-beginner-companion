@@ -41,7 +41,7 @@ impl KeyValue {
 }
 
 /// Erro de sintaxe ao ler um documento KeyValues.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum KeyValuesError {
     #[error("texto entre aspas não terminado na linha {0}")]
     UnterminatedString(usize),

@@ -3,10 +3,11 @@
 use super::*;
 use crate::application::ports::LocatorResult;
 use crate::domain::dota_install::DotaInstall;
-use crate::domain::gsi_config::ConfigMatch;
+use crate::domain::gsi_config::GsiConfigParseError;
+use crate::domain::keyvalues::KeyValuesError;
 use crate::test_support::MemoryFiles;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 struct SingleInstallLocator;
 impl DotaLocator for SingleInstallLocator {
@@ -55,6 +56,12 @@ fn endpoint() -> GsiEndpoint {
     }
 }
 
+fn expected_config_path() -> PathBuf {
+    DotaInstall::game_root_for(Path::new("/lib"))
+        .join("game/dota/cfg/gamestate_integration")
+        .join(gsi_config::CONFIG_FILE_NAME)
+}
+
 #[test]
 fn reports_missing_config_and_closed_dota() {
     let report = run_diagnostics(
@@ -63,17 +70,14 @@ fn reports_missing_config_and_closed_dota() {
         &MemoryFiles::default(),
         &endpoint(),
     );
-    assert_eq!(report.installs[0].config, GsiConfigState::Missing);
+    assert!(matches!(report.installs[0].config, GsiConfigState::Missing));
     assert!(!report.dota_process_running);
 }
 
 #[test]
 fn reports_matching_config_and_running_dota() {
     let files = MemoryFiles::default();
-    let config_path = DotaInstall::game_root_for(Path::new("/lib"))
-        .join("game/dota/cfg/gamestate_integration")
-        .join(gsi_config::CONFIG_FILE_NAME);
-    files.put(&config_path, &gsi_config::render(&endpoint()));
+    files.put(&expected_config_path(), &gsi_config::render(&endpoint()));
 
     let report = run_diagnostics(
         &SingleInstallLocator,
@@ -81,23 +85,46 @@ fn reports_matching_config_and_running_dota() {
         &files,
         &endpoint(),
     );
-    assert_eq!(
-        report.installs[0].config,
-        GsiConfigState::Present(ConfigMatch::Matches)
-    );
+    assert!(matches!(report.installs[0].config, GsiConfigState::Matches));
     assert!(report.dota_process_running);
 }
 
 #[test]
-fn reports_unreadable_config_when_read_fails() {
+fn reports_read_failure_with_path_and_original_error_when_read_fails() {
     let report = run_diagnostics(
         &SingleInstallLocator,
         &FixedProcessProbe(false),
         &UnreadableFiles,
         &endpoint(),
     );
-    assert!(matches!(
-        report.installs[0].config,
-        GsiConfigState::Unreadable(_)
-    ));
+    let GsiConfigState::Failed(GsiConfigFileError::Read { path, source }) =
+        &report.installs[0].config
+    else {
+        panic!("esperava falha de leitura: {:?}", report.installs[0].config);
+    };
+    assert_eq!(path, &expected_config_path());
+    assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn reports_invalid_config_with_parser_cause_when_file_is_not_keyvalues() {
+    let files = MemoryFiles::default();
+    files.put(&expected_config_path(), "\"broken\" {");
+
+    let report = run_diagnostics(
+        &SingleInstallLocator,
+        &FixedProcessProbe(false),
+        &files,
+        &endpoint(),
+    );
+    let GsiConfigState::Failed(GsiConfigFileError::Invalid { path, source }) =
+        &report.installs[0].config
+    else {
+        panic!("esperava arquivo inválido: {:?}", report.installs[0].config);
+    };
+    assert_eq!(path, &expected_config_path());
+    assert_eq!(
+        source,
+        &GsiConfigParseError::KeyValues(KeyValuesError::UnclosedSection)
+    );
 }

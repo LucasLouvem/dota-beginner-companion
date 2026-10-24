@@ -14,8 +14,10 @@ use serde_json::Value;
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
 
-use crate::application::event_bus::{CoreEvent, RejectReason};
+use crate::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
+use crate::application::event_bus::{CoreConnectionError, CoreEvent, GsiServerError, RejectReason};
 
 /// Tamanho máximo aceito para o corpo de uma requisição.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -26,6 +28,12 @@ pub const TEST_MARKER: &str = "dota_companion_test";
 struct ServerState {
     token: Arc<str>,
     events: mpsc::Sender<CoreEvent>,
+}
+
+impl ServerState {
+    fn redactor(&self) -> Redactor {
+        Redactor::new([Arc::clone(&self.token)])
+    }
 }
 
 /// Rotas do servidor GSI com validação de token e limite de corpo.
@@ -39,39 +47,66 @@ pub fn router(token: Arc<str>, events: mpsc::Sender<CoreEvent>) -> Router {
 /// Escuta em `127.0.0.1:<port>` até o processo terminar. Falhas de bind
 /// viram `CoreEvent::ServerFailed` para aparecerem no Diagnóstico.
 pub async fn serve(port: u16, token: Arc<str>, events: mpsc::Sender<CoreEvent>) {
+    let redactor = Redactor::new([Arc::clone(&token)]);
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = match TcpListener::bind(address).await {
         Ok(listener) => listener,
         Err(bind_error) => {
-            let _ = events
-                .send(CoreEvent::ServerFailed(format!("{address}: {bind_error}")))
-                .await;
+            let server_error = GsiServerError::Bind {
+                address,
+                source: Arc::new(bind_error),
+            };
+            report_server_failure(&events, server_error, &redactor).await;
             return;
         }
     };
+    // `local_addr` só falha com o socket inválido, logo depois de um bind que deu certo.
     let bound_address = listener.local_addr().unwrap_or(address);
-    let _ = events.send(CoreEvent::ServerListening(bound_address)).await;
+    if events
+        .send(CoreEvent::ServerListening(bound_address))
+        .await
+        .is_err()
+    {
+        log_error(
+            &CoreConnectionError::EventRejected.to_diagnostic(&redactor),
+            "GSI server is listening but the core is not receiving events",
+        );
+    }
     if let Err(serve_error) = axum::serve(listener, router(token, events.clone())).await {
-        let _ = events
-            .send(CoreEvent::ServerFailed(serve_error.to_string()))
-            .await;
+        let server_error = GsiServerError::Serve {
+            source: Arc::new(serve_error),
+        };
+        report_server_failure(&events, server_error, &redactor).await;
+    }
+}
+
+/// Entrega a falha ao núcleo. Se o núcleo parou, a falha vai para o log em
+/// vez de se perder junto com o canal.
+async fn report_server_failure(
+    events: &mpsc::Sender<CoreEvent>,
+    server_error: GsiServerError,
+    redactor: &Redactor,
+) {
+    if let Err(SendError(CoreEvent::ServerFailed(server_error))) =
+        events.send(CoreEvent::ServerFailed(server_error)).await
+    {
+        log_error(
+            &server_error.to_diagnostic(redactor),
+            "GSI server failed while the core was not receiving events",
+        );
     }
 }
 
 async fn receive(State(state): State<ServerState>, body: Bytes) -> StatusCode {
     let received_at = SystemTime::now();
-    let reject = |reason| CoreEvent::GsiRejected {
-        reason,
-        at: received_at,
-    };
 
     let Ok(mut payload) = serde_json::from_slice::<Value>(&body) else {
-        let _ = state.events.send(reject(RejectReason::InvalidJson)).await;
+        count_rejection(&state, RejectReason::InvalidJson, received_at).await;
         return StatusCode::BAD_REQUEST;
     };
     let token = payload.pointer("/auth/token").and_then(Value::as_str);
     if !token_matches(token, &state.token) {
-        let _ = state.events.send(reject(RejectReason::InvalidToken)).await;
+        count_rejection(&state, RejectReason::InvalidToken, received_at).await;
         return StatusCode::UNAUTHORIZED;
     }
 
@@ -80,8 +115,9 @@ async fn receive(State(state): State<ServerState>, body: Bytes) -> StatusCode {
     if let Some(fields) = payload.as_object_mut() {
         fields.remove("auth");
     }
-    let raw = serde_json::to_string_pretty(&payload).unwrap_or_default();
-    let _ = state
+    let raw = serde_json::to_string_pretty(&payload)
+        .expect("um Value lido de JSON tem só chaves de texto e sempre volta a ser serializado");
+    let delivered = state
         .events
         .send(CoreEvent::GsiAccepted {
             raw: raw.into(),
@@ -89,7 +125,31 @@ async fn receive(State(state): State<ServerState>, body: Bytes) -> StatusCode {
             is_test,
         })
         .await;
+    if delivered.is_err() {
+        // O evento devolvido pelo canal não é registrado: ele contém o payload.
+        log_error(
+            &CoreConnectionError::EventRejected.to_diagnostic(&state.redactor()),
+            "GSI event could not be delivered to the core; answering 503",
+        );
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
     StatusCode::OK
+}
+
+/// A recusa continua valendo para quem enviou; só a contagem no Diagnóstico
+/// se perde quando o núcleo parou.
+async fn count_rejection(state: &ServerState, reason: RejectReason, at: SystemTime) {
+    if state
+        .events
+        .send(CoreEvent::GsiRejected { reason, at })
+        .await
+        .is_err()
+    {
+        log_warning(
+            &CoreConnectionError::EventRejected.to_diagnostic(&state.redactor()),
+            "rejected GSI request could not be counted by the core",
+        );
+    }
 }
 
 fn token_matches(received: Option<&str>, expected: &str) -> bool {

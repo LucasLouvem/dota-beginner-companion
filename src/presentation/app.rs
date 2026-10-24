@@ -21,6 +21,31 @@ pub struct CoreHandle {
     pub state: watch::Receiver<AppSnapshot>,
 }
 
+/// O que a janela recebe do laço que acompanha o núcleo.
+#[derive(Debug)]
+pub enum CoreUpdate {
+    Snapshot(Box<AppSnapshot>),
+    /// O canal de estado fechou: o núcleo parou.
+    Stopped,
+}
+
+/// Repassa cada novo estado e avisa uma única vez se o canal fechar. No
+/// encerramento normal este laço é descartado antes, junto com a janela, e o
+/// canal não chega a fechar; por isso `Stopped` sempre indica falha.
+pub async fn forward_snapshots(
+    mut state: watch::Receiver<AppSnapshot>,
+    mut emit: impl FnMut(CoreUpdate),
+) {
+    loop {
+        let snapshot = state.borrow_and_update().clone();
+        emit(CoreUpdate::Snapshot(Box::new(snapshot)));
+        if state.changed().await.is_err() {
+            emit(CoreUpdate::Stopped);
+            return;
+        }
+    }
+}
+
 /// Componente raiz da janela principal.
 pub struct App {
     diagnostics: Controller<DiagnosticsPage>,
@@ -35,7 +60,7 @@ impl Component for App {
     type Init = CoreHandle;
     type Input = ();
     type Output = ();
-    type CommandOutput = Box<AppSnapshot>;
+    type CommandOutput = CoreUpdate;
     type Root = adw::ApplicationWindow;
     type Widgets = AppWidgets;
 
@@ -90,18 +115,10 @@ impl Component for App {
         toolbar.set_content(Some(&body));
         root.set_content(Some(&toolbar));
 
-        let mut state = core.state;
+        let state = core.state;
         sender.command(move |output, shutdown| {
             shutdown
-                .register(async move {
-                    loop {
-                        let snapshot = state.borrow_and_update().clone();
-                        output.emit(Box::new(snapshot));
-                        if state.changed().await.is_err() {
-                            break;
-                        }
-                    }
-                })
+                .register(forward_snapshots(state, move |update| output.emit(update)))
                 .drop_on_shutdown()
         });
 
@@ -114,13 +131,23 @@ impl Component for App {
     fn update_cmd_with_view(
         &mut self,
         widgets: &mut Self::Widgets,
-        snapshot: Self::CommandOutput,
+        update: Self::CommandOutput,
         _sender: ComponentSender<Self>,
         _root: &Self::Root,
     ) {
-        widgets.connection.set_label(&connection_label(&snapshot));
-        self.diagnostics
-            .emit(DiagnosticsMessage::Snapshot(snapshot));
+        match update {
+            CoreUpdate::Snapshot(snapshot) => {
+                widgets.connection.set_label(&connection_label(&snapshot));
+                self.diagnostics
+                    .emit(DiagnosticsMessage::Snapshot(snapshot));
+            }
+            CoreUpdate::Stopped => {
+                widgets
+                    .connection
+                    .set_label(&translate("GSI: núcleo parado"));
+                self.diagnostics.emit(DiagnosticsMessage::CoreStopped);
+            }
+        }
     }
 }
 
@@ -148,3 +175,7 @@ fn connection_label(snapshot: &AppSnapshot) -> String {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/presentation/app_tests.rs"]
+mod tests;

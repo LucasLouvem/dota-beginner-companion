@@ -1,36 +1,61 @@
 //! Composição do aplicativo: cria os adaptadores, inicia o núcleo e o
 //! servidor GSI em um runtime tokio e abre a janela GTK.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Context;
 use relm4::RelmApp;
 use tokio::sync::{mpsc, watch};
 
 use dota_companion::application::core::{self, CoreDependencies};
+use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::domain::gsi_config::GsiEndpoint;
-use dota_companion::infrastructure::config;
+use dota_companion::infrastructure::{config, logging};
 use dota_companion::presentation::app::{App, CoreHandle};
+use dota_companion::presentation::widgets::diagnostic_text;
 use dota_companion::{application, gsi, infrastructure, presentation};
 
 const APP_ID: &str = "io.github.dotacompanion.DotaBeginnerCompanion";
 
 fn main() -> anyhow::Result<()> {
-    let _ = dotenvy::dotenv();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-    presentation::i18n::init();
+    // Lido antes do log porque o `.env` pode definir o `RUST_LOG`.
+    let env_file = config::read_env_file(Path::new(config::ENV_FILE_NAME));
+    let env_values = env_file.as_ref().ok();
+    // O ambiente do processo tem prioridade sobre o `.env`, como no dotenvy.
+    let lookup = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .or_else(|| env_values.and_then(|values| values.get(name)))
+    };
+
+    let (log_filter, log_filter_error) = logging::log_filter(lookup("RUST_LOG").as_deref());
+    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // Registrado como erro porque o filtro de fallback só deixa passar erros.
+    if let Some(filter_error) = log_filter_error {
+        log_error(
+            &filter_error.to_diagnostic(&Redactor::default()),
+            "invalid RUST_LOG; logging errors only",
+        );
+    }
+    if let Err(env_error) = &env_file {
+        return Err(startup_failure(env_error, &Redactor::default()));
+    }
+    if let Err(translation_error) = presentation::i18n::init() {
+        log_warning(
+            &translation_error.to_diagnostic(&Redactor::default()),
+            "translations unavailable; using built-in Portuguese texts",
+        );
+    }
 
     let config_path = config::config_path();
-    let config = config::load_or_init(&config_path)
-        .with_context(|| format!("lendo {}", config_path.display()))?;
+    let config = config::load_or_init(&config_path, lookup)
+        .map_err(|config_error| startup_failure(&config_error, &Redactor::default()))?;
     let endpoint = GsiEndpoint {
         port: config.gsi_port,
         token: config.gsi_token.clone(),
     };
+    let redactor = Redactor::new([endpoint.token.as_str()]);
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
@@ -42,7 +67,10 @@ fn main() -> anyhow::Result<()> {
         )),
         probe: Arc::new(infrastructure::process::ProcProbe::default()),
         files: Arc::new(infrastructure::config_files::LocalConfigFiles),
-        tester: Arc::new(gsi::client::HttpConnectionTester::new()?),
+        tester: Arc::new(
+            gsi::client::HttpConnectionTester::new()
+                .map_err(|tester_error| startup_failure(&tester_error, &redactor))?,
+        ),
         recorder: config.gsi_log.clone().map(|log_path| {
             Arc::new(infrastructure::gsi_log_file::JsonLinesGsiRecorder::new(
                 log_path,
@@ -63,7 +91,9 @@ fn main() -> anyhow::Result<()> {
             path,
             written: 0,
             last_error: None,
+            stopped: None,
         }),
+        redactor,
         ..AppSnapshot::default()
     });
 
@@ -88,4 +118,11 @@ fn main() -> anyhow::Result<()> {
         });
     runtime.shutdown_background();
     Ok(())
+}
+
+/// Falha que impede a inicialização. Só o diagnóstico sanitizado vai para o
+/// terminal: o erro original não entra na cadeia do `anyhow`, porque ela é
+/// impressa por inteiro e pode citar o conteúdo do `config.toml`.
+fn startup_failure(error: &impl ToDiagnostic, redactor: &Redactor) -> anyhow::Error {
+    anyhow::anyhow!("{}", diagnostic_text(&error.to_diagnostic(redactor)))
 }

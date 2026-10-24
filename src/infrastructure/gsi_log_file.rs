@@ -5,6 +5,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -28,14 +29,19 @@ impl GsiRecorder for JsonLinesGsiRecorder {
     /// SteamID e nome do jogador.
     fn record(&self, received_at: SystemTime, raw: &str) -> Result<(), GsiRecordError> {
         let payload: Value =
-            serde_json::from_str(raw).map_err(|_| GsiRecordError::InvalidPayload)?;
+            serde_json::from_str(raw).map_err(|parse_error| GsiRecordError::InvalidPayload {
+                source: Arc::new(parse_error),
+            })?;
         let received_at_ms = received_at
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
             .unwrap_or_default();
         let line = json!({ "received_at_ms": received_at_ms, "payload": payload });
 
-        let write_error = |io_error: std::io::Error| GsiRecordError::Write(io_error.kind());
+        let write_error = |io_error: std::io::Error| GsiRecordError::Write {
+            path: self.path.clone(),
+            source: Arc::new(io_error),
+        };
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)

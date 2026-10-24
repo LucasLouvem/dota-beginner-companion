@@ -21,9 +21,12 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
 
 ## Contrato central
 
-Esta seção define o padrão obrigatório para a adequação do código. A centralização ainda não está implementada; o catálogo abaixo descreve os comportamentos atuais.
+O contrato e a estrutura do diagnóstico ficam em um único arquivo, `application/error.rs`. Em Rust, o equivalente a herdar uma estrutura e especializar seu conteúdo é usar composição e traits. Erros específicos preservam seus tipos e causas, mas sua conversão para diagnóstico segue a mesma estrutura central.
 
-O contrato e a estrutura do diagnóstico devem ser definidos em um único arquivo, `application/error.rs`. Em Rust, o equivalente a herdar uma estrutura e especializar seu conteúdo é usar composição e traits. Erros específicos preservam seus tipos e causas, mas sua conversão para diagnóstico segue a mesma estrutura central.
+- `Diagnostic` reúne os campos da tabela abaixo; `DiagnosticCode` lista os códigos do catálogo.
+- Cada erro específico implementa a trait `ToDiagnostic`. Causas desconhecidas usam `Diagnostic::unclassified`.
+- Os textos são msgids em PT-BR (`UiText`), traduzidos pela apresentação.
+- `technical_details` é a mensagem do erro seguida das mensagens de cada causa (`source`), com o token trocado por `[removido]` pelo `Redactor`.
 
 | Campo               | Obrigatório                  | Regra                                                                                                                      |
 | ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -43,6 +46,9 @@ Regras de organização:
 - Causas são classificadas por variantes e códigos tipados das bibliotecas, quando disponíveis. Não compare trechos de mensagens para decidir o tratamento.
 - Códigos HTTP pertencem somente ao adaptador HTTP do GSI. Erros de arquivo, domínio ou interface não recebem um `statuscode` artificial.
 - A cadeia técnica preservada internamente pode conter contexto sensível; somente sua versão sanitizada pode aparecer na interface, no terminal ou nos logs. Não registre tokens, payloads completos ou dados pessoais para diagnosticar erros.
+- Diagnósticos registrados em log usam `log_error` ou `log_warning` (`application/error.rs`): só o código e os detalhes técnicos sanitizados, com a mensagem em inglês.
+- Canal fechado entre o servidor GSI, o núcleo e a interface é sempre falha inesperada com o aplicativo aberto: no encerramento normal o runtime descarta as tarefas antes que elas percebam o canal fechado. A falha é informada por outro caminho (log ou estado local da interface), nunca só pelo canal que falhou.
+- Ignorar um resultado (`let _ =`) só é aceito com um comentário que explique por que ignorar é correto naquele ponto.
 
 ### Exemplo de diagnóstico conhecido
 
@@ -92,35 +98,47 @@ Prefira conferir código, contexto e conteúdo necessário à orientação. Não
 
 ## Catálogo
 
-### Servidor GSI
+A coluna "Código" mostra o `DiagnosticCode` exibido. Situações com "—" são estados ou respostas esperadas, não erros.
 
-| Situação                                | Resposta / estado                                         | Ação para o usuário                           |
-| --------------------------------------- | --------------------------------------------------------- | --------------------------------------------- |
-| Porta em uso ou sem permissão para bind | Estado "Servidor local não iniciou", com endereço e causa | Alterar `gsi_port` e reinstalar o arquivo GSI |
-| Token ausente ou diferente              | HTTP 401; o contador de recusadas aumenta                 | Reinstalar o arquivo GSI                      |
-| Corpo que não é JSON válido             | HTTP 400; o contador de recusadas aumenta                 | Verificar quem está enviando para a porta     |
-| Corpo acima de 1 MB                     | HTTP 413                                                  | —                                             |
+### Servidor GSI (`GsiServerError`)
 
-### Arquivo de configuração GSI
+| Situação                                | Código                           | Estado ou resposta                                   | Ação para o usuário                                           |
+| --------------------------------------- | -------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| Porta em uso                            | `GSI_BIND_FAILED`                | "Servidor GSI não iniciou", com a porta              | Escolher outra porta em `gsi_port` e reinstalar o arquivo GSI |
+| Sem permissão para escutar na porta     | `GSI_BIND_PERMISSION_DENIED`     | "Servidor GSI não iniciou", com a porta              | Escolher uma porta acima de 1024 e reinstalar o arquivo GSI   |
+| Outra falha ao escutar na porta         | `UNCLASSIFIED_ERROR`             | "Servidor GSI não iniciou", com os detalhes técnicos | Consultar os detalhes técnicos                                |
+| O servidor parou de atender requisições | `UNCLASSIFIED_ERROR`             | "Servidor GSI parou", com os detalhes técnicos       | Consultar os detalhes técnicos                                |
+| Token ausente ou diferente              | —                                | HTTP 401; o contador de recusadas aumenta            | Reinstalar o arquivo GSI                                      |
+| Corpo que não é JSON válido             | —                                | HTTP 400; o contador de recusadas aumenta            | Verificar quem está enviando para a porta                     |
+| Corpo acima de 1 MB                     | —                                | HTTP 413                                             | —                                                             |
+| O núcleo não recebe o evento aceito     | `CORE_UNAVAILABLE`, só no log    | HTTP 503                                             | Reiniciar o aplicativo                                        |
+| O núcleo não recebe uma recusa          | `CORE_UNAVAILABLE`, aviso no log | HTTP 401 ou 400; a recusa não é contada              | Reiniciar o aplicativo                                        |
 
-| Situação                                       | Estado                                                 | Ação para o usuário                                                  |
-| ---------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------- |
-| Arquivo não existe                             | "Arquivo GSI não instalado"                            | Clicar em "Instalar configuração GSI"                                |
-| `uri` aponta para outra porta/endereço         | "Arquivo GSI aponta para outro endereço"               | Reinstalar                                                           |
-| Token diferente do `config.toml`               | "Token do arquivo GSI diferente do aplicativo"         | Reinstalar                                                           |
-| Conteúdo não é KeyValues válido                | "Arquivo GSI inválido", com a causa do parser          | Reinstalar (com backup)                                              |
-| Sem permissão de leitura                       | "Não foi possível ler o arquivo GSI"                   | Corrigir as permissões da pasta do Dota                              |
-| Arquivo existente diferente na instalação      | "Instalação aguardando confirmação" + diálogo          | Confirmar a substituição; o backup `.bak-<timestamp>` é criado antes |
-| Falha ao criar a pasta, gravar ou fazer backup | "Falha ao instalar o arquivo GSI", com caminho e causa | Corrigir as permissões da pasta `game/dota/cfg`                      |
+### Arquivo de configuração GSI (`GsiConfigFileError`, `InstallError`)
 
-### Formato KeyValues (`KeyValuesError`)
+| Situação                                                 | Código                                 | Estado                                                         | Ação para o usuário                                                  |
+| -------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Arquivo não existe                                       | —                                      | "Arquivo GSI não instalado"                                    | Clicar em "Instalar configuração GSI"                                |
+| `uri` aponta para outra porta ou endereço                | —                                      | "Arquivo GSI aponta para outro endereço"                       | Reinstalar                                                           |
+| Token diferente do `config.toml`                         | —                                      | "Token do arquivo GSI diferente do aplicativo"                 | Reinstalar                                                           |
+| Conteúdo não é KeyValues válido ou não tem seção         | `GSI_CONFIG_INVALID`                   | "Arquivo GSI inválido", com a causa do parser nos detalhes     | Reinstalar (com backup)                                              |
+| Sem permissão de leitura                                 | `GSI_CONFIG_READ_PERMISSION_DENIED`    | "Não foi possível ler o arquivo GSI"                           | Corrigir as permissões da pasta do Dota                              |
+| Outra falha de leitura                                   | `UNCLASSIFIED_ERROR`                   | "Não foi possível ler o arquivo GSI", com os detalhes técnicos | Consultar os detalhes técnicos                                       |
+| Arquivo existente diferente na instalação                | —                                      | "Instalação aguardando confirmação" + diálogo                  | Confirmar a substituição; o backup `.bak-<timestamp>` é criado antes |
+| Sem permissão para criar a pasta, gravar ou fazer backup | `GSI_CONFIG_INSTALL_PERMISSION_DENIED` | "Falha ao instalar o arquivo GSI", com o caminho               | Corrigir as permissões da pasta `game/dota/cfg`                      |
+| Outra falha ao criar a pasta, gravar ou fazer backup     | `UNCLASSIFIED_ERROR`                   | "Falha ao instalar o arquivo GSI", com os detalhes técnicos    | Consultar os detalhes técnicos                                       |
 
-| Variante                    | Significado                       |
-| --------------------------- | --------------------------------- |
-| `UnterminatedString(linha)` | Aspas abertas e não fechadas      |
-| `UnexpectedClose(linha)`    | `}` sem seção aberta              |
-| `MissingValue(linha)`       | Chave sem valor ou `{` sem chave  |
-| `UnclosedSection`           | Seção aberta até o fim do arquivo |
+### Formato KeyValues (`KeyValuesError`, `GsiConfigParseError`)
+
+Erros do domínio, sem código próprio. Em um `.cfg` do GSI, qualquer um deles vira `GSI_CONFIG_INVALID`.
+
+| Variante                                    | Significado                       |
+| ------------------------------------------- | --------------------------------- |
+| `KeyValuesError::UnterminatedString(linha)` | Aspas abertas e não fechadas      |
+| `KeyValuesError::UnexpectedClose(linha)`    | `}` sem seção aberta              |
+| `KeyValuesError::MissingValue(linha)`       | Chave sem valor ou `{` sem chave  |
+| `KeyValuesError::UnclosedSection`           | Seção aberta até o fim do arquivo |
+| `GsiConfigParseError::MissingSection`       | O `.cfg` não tem nenhuma seção    |
 
 ### Steam e Dota
 
@@ -129,23 +147,68 @@ Prefira conferir código, contexto e conteúdo necessário à orientação. Não
 | Nenhuma instalação do Dota encontrada      | "Dota 2 não encontrado", com as bibliotecas verificadas             | Adicionar a biblioteca em `extra_libraries` ou `DOTA_COMPANION_EXTRA_LIBRARIES` |
 | `libraryfolders.vdf` ausente ou malformado | O arquivo é ignorado e as outras fontes continuam sendo verificadas | —                                                                               |
 
-### Configuração do aplicativo
+### Inicialização (`ConfigError`, `HttpConnectionTesterError`)
 
-| Situação                            | Comportamento                                                 | Ação para o usuário                                      |
-| ----------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
-| `config.toml` com conteúdo inválido | O aplicativo encerra e mostra o caminho e a causa no terminal | Corrigir ou apagar o arquivo (um novo token será gerado) |
+O aplicativo encerra e mostra o diagnóstico no terminal. Os detalhes de um `config.toml` inválido trazem só a linha e a coluna, porque a mensagem do parser cita o conteúdo do arquivo, que pode conter o token.
+
+| Situação                                             | Código                         | Ação para o usuário                                                                |
+| ---------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------- |
+| `config.toml` com conteúdo inválido                  | `APP_CONFIG_INVALID`           | Corrigir ou apagar o arquivo (um novo token será gerado; reinstalar o arquivo GSI) |
+| Sem permissão para ler ou gravar o `config.toml`     | `APP_CONFIG_PERMISSION_DENIED` | Corrigir as permissões do arquivo ou da pasta                                      |
+| Outra falha ao ler, gravar ou gerar o token          | `UNCLASSIFIED_ERROR`           | Consultar os detalhes técnicos                                                     |
+| Cliente HTTP do teste de conexão não pôde ser criado | `UNCLASSIFIED_ERROR`           | Consultar os detalhes técnicos                                                     |
+
+### Arquivo `.env` (`EnvFileError`)
+
+O `.env` é opcional e lido só no diretório de execução, sem alterar o ambiente do processo. Se ele falhar, o aplicativo encerra antes de usar qualquer valor do arquivo e mostra o diagnóstico no terminal. Os detalhes de uma linha inválida trazem só a linha e a coluna, porque a mensagem do dotenvy cita a linha inteira, que pode conter segredos.
+
+| Situação                          | Código                       | Ação para o usuário                                 |
+| --------------------------------- | ---------------------------- | --------------------------------------------------- |
+| Arquivo ausente                   | —                            | —                                                   |
+| Linha com sintaxe inválida        | `ENV_FILE_INVALID`           | Corrigir a linha indicada ou remover o `.env`       |
+| Sem permissão de leitura          | `ENV_FILE_PERMISSION_DENIED` | Corrigir a permissão do arquivo ou remover o `.env` |
+| Outra falha ao ler ou interpretar | `UNCLASSIFIED_ERROR`         | Consultar os detalhes técnicos                      |
+
+### Avisos na inicialização (`LogFilterError`, `TranslationSetupError`)
+
+O aplicativo continua com um fallback e registra o diagnóstico no log. As traduções geram um aviso, que só aparece com `RUST_LOG` em `warn` ou mais detalhado; o `RUST_LOG` inválido é registrado como erro, porque o filtro de fallback só mostra erros.
+
+| Situação                             | Código                     | Fallback              | Ação para o usuário                            |
+| ------------------------------------ | -------------------------- | --------------------- | ---------------------------------------------- |
+| `RUST_LOG` com diretiva inválida     | `UNCLASSIFIED_ERROR`       | O log mostra só erros | Corrigir o `RUST_LOG`                          |
+| Idioma do sistema não suportado      | `TRANSLATIONS_UNAVAILABLE` | Textos em português   | Verificar se o idioma de `LANG` está instalado |
+| Traduções não puderam ser carregadas | `TRANSLATIONS_UNAVAILABLE` | Textos em português   | Verificar a instalação das traduções           |
+
+### Núcleo e tarefas (`TaskInterrupted`, `CoreConnectionError`)
+
+Os detalhes técnicos trazem só a operação e a causa: a mensagem de um pânico pode conter dados processados e não aparece.
+
+| Situação                                                                         | Código                  | Estado                                                                   | Ação para o usuário                                |
+| -------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------ | -------------------------------------------------- |
+| Diagnóstico, instalação ou teste de conexão terminou com pânico ou foi cancelado | `CORE_TASK_INTERRUPTED` | Linha da operação interrompida; o teste sai de "Testando…"               | Tentar de novo; se repetir, reiniciar o aplicativo |
+| A gravação do log de eventos parou                                               | `CORE_TASK_INTERRUPTED` | "A gravação do log de eventos GSI parou"; nenhum evento é gravado depois | Reiniciar o aplicativo                             |
+| A tela deixou de receber o estado                                                | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou"; a barra mostra "GSI: núcleo parado"      | Reiniciar o aplicativo                             |
+| Um comando da tela não foi recebido                                              | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou", com o comando                            | Reiniciar o aplicativo                             |
 
 ### Log de eventos GSI (`GsiRecordError`)
 
-| Variante         | Estado                                                       | Ação para o usuário                                                   |
-| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `Write(tipo)`    | "Falha ao gravar o log de eventos GSI", com caminho e motivo | Criar a pasta do arquivo ou corrigir a permissão; o app segue rodando |
-| `InvalidPayload` | Mesma linha, com "o evento recebido não é um JSON válido"    | —                                                                     |
+O aplicativo continua rodando; a linha "Falha ao gravar o log de eventos GSI" mostra o diagnóstico.
 
-### Teste de conexão
+| Situação                      | Código                      | Ação para o usuário                               |
+| ----------------------------- | --------------------------- | ------------------------------------------------- |
+| A pasta do arquivo não existe | `GSI_LOG_DIRECTORY_MISSING` | Criar a pasta ou alterar `DOTA_COMPANION_GSI_LOG` |
+| Sem permissão para gravar     | `GSI_LOG_PERMISSION_DENIED` | Corrigir a permissão do arquivo ou da pasta       |
+| Outra falha ao gravar         | `UNCLASSIFIED_ERROR`        | Consultar os detalhes técnicos                    |
+| O evento não é um JSON válido | `GSI_LOG_INVALID_PAYLOAD`   | —                                                 |
 
-| Situação                                                                                     | Estado                                            | Ação para o usuário                           |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------- |
-| Servidor não respondeu                                                                       | "Teste de conexão falhou", com a causa            | Verificar o estado do servidor no Diagnóstico |
-| Servidor respondeu com status diferente de sucesso                                           | "Teste de conexão falhou", com o status HTTP      | Verificar porta e token                       |
-| Cliente HTTP não pôde ser criado na inicialização (`HttpConnectionTesterError::ClientBuild`) | O aplicativo encerra e mostra a causa no terminal | Consultar a causa exibida no terminal         |
+### Teste de conexão (`ConnectionTestError`)
+
+Todas as falhas aparecem como "Teste de conexão falhou". O status HTTP é classificado só no adaptador `gsi::client` e aparece apenas nos detalhes técnicos.
+
+| Situação                             | Código                             | Ação para o usuário                                             |
+| ------------------------------------ | ---------------------------------- | --------------------------------------------------------------- |
+| Conexão recusada                     | `CONNECTION_TEST_UNREACHABLE`      | Verificar no Diagnóstico se o servidor local está ouvindo       |
+| Sem resposta em 3 s                  | `CONNECTION_TEST_TIMED_OUT`        | Verificar o servidor local e tentar de novo                     |
+| Token recusado (HTTP 401)            | `CONNECTION_TEST_TOKEN_REJECTED`   | Verificar se `gsi_port` não está sendo usada por outro programa |
+| Conteúdo recusado (HTTP 400 ou 413)  | `CONNECTION_TEST_PAYLOAD_REJECTED` | Verificar se `gsi_port` não está sendo usada por outro programa |
+| Outro status HTTP ou falha ao enviar | `UNCLASSIFIED_ERROR`               | Consultar os detalhes técnicos                                  |
