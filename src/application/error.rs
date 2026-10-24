@@ -49,6 +49,10 @@ pub enum DiagnosticCode {
     CoreUnavailable,
     /// As traduções não puderam ser preparadas; os textos ficam em PT-BR.
     TranslationsUnavailable,
+    /// O banco local não pôde ser aberto ou gravado.
+    StorageUnavailable,
+    /// O banco local está corrompido ou não é um banco SQLite.
+    StorageCorrupted,
     /// Causa ainda não classificada; o diagnóstico traz os detalhes técnicos.
     Unclassified,
 }
@@ -75,6 +79,8 @@ impl DiagnosticCode {
         DiagnosticCode::CoreTaskInterrupted,
         DiagnosticCode::CoreUnavailable,
         DiagnosticCode::TranslationsUnavailable,
+        DiagnosticCode::StorageUnavailable,
+        DiagnosticCode::StorageCorrupted,
         DiagnosticCode::Unclassified,
     ];
 
@@ -102,6 +108,8 @@ impl DiagnosticCode {
             DiagnosticCode::CoreTaskInterrupted => "CORE_TASK_INTERRUPTED",
             DiagnosticCode::CoreUnavailable => "CORE_UNAVAILABLE",
             DiagnosticCode::TranslationsUnavailable => "TRANSLATIONS_UNAVAILABLE",
+            DiagnosticCode::StorageUnavailable => "STORAGE_UNAVAILABLE",
+            DiagnosticCode::StorageCorrupted => "STORAGE_CORRUPTED",
             DiagnosticCode::Unclassified => "UNCLASSIFIED_ERROR",
         }
     }

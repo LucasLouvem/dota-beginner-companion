@@ -1,4 +1,4 @@
-//! Interfaces que os adaptadores (infraestrutura e GSI) implementam.
+//! Interfaces que os adaptadores (infraestrutura, GSI e storage) implementam.
 
 use std::error::Error;
 use std::future::Future;
@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
@@ -186,6 +186,114 @@ impl ToDiagnostic for ConnectionTestError {
             technical_details: Some(technical_details(self, redactor)),
         }
     }
+}
+
+/// Se um valor do cache ainda vale ou já passou do prazo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Freshness {
+    Fresh,
+    /// Passou do prazo; ainda pode ser exibido, marcado como antigo.
+    Stale,
+}
+
+impl Freshness {
+    /// Um valor gravado em `stored_at` vale por `ttl` a partir dali. Um horário
+    /// de gravação no futuro (relógio ajustado para trás) conta como válido.
+    pub fn of(stored_at: SystemTime, now: SystemTime, ttl: Duration) -> Self {
+        match now.duration_since(stored_at) {
+            Ok(age) if age > ttl => Freshness::Stale,
+            _ => Freshness::Fresh,
+        }
+    }
+}
+
+/// Valor lido do cache, com o horário da gravação.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedValue {
+    pub value: String,
+    pub stored_at: SystemTime,
+    pub freshness: Freshness,
+}
+
+/// Como uma falha do banco local foi classificada pelo adaptador.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageFailureKind {
+    /// O arquivo não pôde ser aberto ou gravado (permissão, somente leitura).
+    Unavailable,
+    /// O arquivo está corrompido ou não é um banco SQLite.
+    Corrupted,
+    /// Causa ainda não classificada.
+    Other,
+}
+
+/// Falha do banco local.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum StorageError {
+    #[error("não foi possível abrir o banco local {}", path.display())]
+    Open {
+        path: PathBuf,
+        kind: StorageFailureKind,
+        #[source]
+        source: SharedError,
+    },
+    #[error("a operação \"{operation}\" no banco local falhou")]
+    Operation {
+        operation: &'static str,
+        kind: StorageFailureKind,
+        #[source]
+        source: SharedError,
+    },
+}
+
+impl StorageError {
+    pub fn kind(&self) -> StorageFailureKind {
+        match self {
+            StorageError::Open { kind, .. } | StorageError::Operation { kind, .. } => *kind,
+        }
+    }
+}
+
+impl ToDiagnostic for StorageError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        let title = UiText::new("Banco local indisponível");
+        let (code, cause, resolution) = match self.kind() {
+            StorageFailureKind::Unavailable => (
+                DiagnosticCode::StorageUnavailable,
+                "O banco local não pôde ser aberto ou gravado.",
+                "Verifique a permissão da pasta de dados do aplicativo.",
+            ),
+            StorageFailureKind::Corrupted => (
+                DiagnosticCode::StorageCorrupted,
+                "O banco local está corrompido ou não é um banco SQLite.",
+                "Apague o arquivo do banco local; o aplicativo cria um novo e o cache é refeito.",
+            ),
+            StorageFailureKind::Other => {
+                return Diagnostic::unclassified(title, "O banco local falhou.", self, redactor);
+            }
+        };
+        Diagnostic {
+            code,
+            title,
+            cause: UiText::new(cause),
+            resolution: UiText::new(resolution),
+            technical_details: Some(technical_details(self, redactor)),
+        }
+    }
+}
+
+/// Cache local de dados baixados, com prazo de validade (TTL).
+pub trait CacheStore: Send + Sync {
+    /// Grava ou substitui o valor da chave.
+    fn put(&self, key: &str, value: &str, stored_at: SystemTime) -> Result<(), StorageError>;
+    /// Valor da chave, marcado como antigo se passou de `ttl`; `None` se não existe.
+    fn get(
+        &self,
+        key: &str,
+        ttl: Duration,
+        now: SystemTime,
+    ) -> Result<Option<CachedValue>, StorageError>;
+    /// Remove os valores gravados antes de `cutoff` e devolve quantos saíram.
+    fn purge_older_than(&self, cutoff: SystemTime) -> Result<usize, StorageError>;
 }
 
 /// Verifica se o servidor GSI local aceita eventos.

@@ -112,6 +112,45 @@ fn log_invalid_payload_is_classified_with_its_own_code() {
 }
 
 #[test]
+fn value_is_fresh_until_ttl_and_stale_after_it() {
+    let stored_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+    let ttl = Duration::from_secs(60);
+    assert_eq!(
+        Freshness::of(stored_at, stored_at + ttl, ttl),
+        Freshness::Fresh
+    );
+    assert_eq!(
+        Freshness::of(stored_at, stored_at + ttl + Duration::from_secs(1), ttl),
+        Freshness::Stale
+    );
+}
+
+#[test]
+fn value_stored_in_the_future_counts_as_fresh() {
+    let stored_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+    let now = stored_at - Duration::from_secs(500);
+    assert_eq!(
+        Freshness::of(stored_at, now, Duration::from_secs(1)),
+        Freshness::Fresh
+    );
+}
+
+#[test]
+fn storage_operation_failure_without_known_cause_is_unclassified() {
+    let storage_error = StorageError::Operation {
+        operation: "ler o cache",
+        kind: StorageFailureKind::Other,
+        source: simulated_source("disco cheio"),
+    };
+    let diagnostic = storage_error.to_diagnostic(&Redactor::default());
+    assert_eq!(diagnostic.code, DiagnosticCode::Unclassified);
+    assert_eq!(
+        diagnostic.technical_details.as_deref(),
+        Some("a operação \"ler o cache\" no banco local falhou: disco cheio")
+    );
+}
+
+#[test]
 fn request_failure_details_do_not_expose_the_token() {
     let diagnostic = ConnectionTestError::Request {
         source: simulated_source("falha ao enviar auth.token=abc123"),
