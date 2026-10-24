@@ -43,7 +43,7 @@ impl ConnectionTester for HttpConnectionTester {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|request_error| request_error.to_string())?;
             if response.status().is_success() {
                 Ok(())
             } else {
@@ -60,31 +60,46 @@ mod tests {
     use crate::gsi::server::serve;
     use tokio::sync::mpsc;
 
-    #[tokio::test]
-    async fn test_event_reaches_real_server() {
-        let (tx, mut rx) = mpsc::channel(4);
-        tokio::spawn(serve(0, "secret".into(), tx));
-        let Some(CoreEvent::ServerListening(addr)) = rx.recv().await else {
+    /// Inicia um servidor real em porta livre e devolve o endpoint e o canal de eventos.
+    async fn start_server(token: &str) -> (GsiEndpoint, mpsc::Receiver<CoreEvent>) {
+        let (event_sender, mut event_receiver) = mpsc::channel(4);
+        tokio::spawn(serve(0, token.into(), event_sender));
+        let Some(CoreEvent::ServerListening(address)) = event_receiver.recv().await else {
             panic!("servidor não iniciou");
         };
-        let tester = HttpConnectionTester::new();
-
-        let good = GsiEndpoint {
-            port: addr.port(),
-            token: "secret".into(),
+        let endpoint = GsiEndpoint {
+            port: address.port(),
+            token: token.into(),
         };
-        tester.send_test_event(&good).await.unwrap();
+        (endpoint, event_receiver)
+    }
+
+    #[tokio::test]
+    async fn test_event_with_valid_token_reaches_server_as_test() {
+        let (endpoint, mut event_receiver) = start_server("secret").await;
+
+        HttpConnectionTester::new()
+            .send_test_event(&endpoint)
+            .await
+            .unwrap();
         assert!(matches!(
-            rx.recv().await,
+            event_receiver.recv().await,
             Some(CoreEvent::GsiAccepted { is_test: true, .. })
         ));
+    }
 
-        let bad = GsiEndpoint {
+    #[tokio::test]
+    async fn test_event_with_wrong_token_fails_with_http_status() {
+        let (endpoint, _event_receiver) = start_server("secret").await;
+        let wrong_token = GsiEndpoint {
             token: "wrong".into(),
-            ..good
+            ..endpoint
         };
+
         assert_eq!(
-            tester.send_test_event(&bad).await,
+            HttpConnectionTester::new()
+                .send_test_event(&wrong_token)
+                .await,
             Err("HTTP 401 Unauthorized".into())
         );
     }
