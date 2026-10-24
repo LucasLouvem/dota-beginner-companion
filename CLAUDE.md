@@ -51,11 +51,20 @@ conforme [`docs/COMMITS.md`](docs/COMMITS.md).
    os resultados mínimos verificados), marque-a `✓ Concluída`,
    registre em "Mudanças no plano", atualize a data e peça
    confirmação antes de marcar a próxima como `-> Atual`.
-1. **Entenda antes de mudar.** Leia o código relacionado e o
-   documento relevante de `docs/` antes de editar.
-   Antes de criar função, tipo ou widget, procure no `src/` algo
-   que já resolva e reaproveite
-   ([`docs/CODE_STANDARDS.md`](docs/CODE_STANDARDS.md)).
+1. **Consulte a documentação antes de agir. Nada de adivinhar.**
+   Antes de qualquer mudança ou comando, siga esta ordem:
+   1. a documentação do projeto em `docs/` e o código relacionado;
+   2. a documentação oficial da ferramenta, crate, API ou módulo
+      envolvido (docs.rs, guias e exemplos do projeto, documentação
+      da Valve/Steam), na versão declarada no `Cargo.toml`;
+   3. só se nenhuma das duas cobrir o caso, implemente uma solução
+      própria e diga isso no resumo final.
+
+   Siga exatamente o que a documentação define; não invente API,
+   parâmetro, comportamento ou formato. Se a documentação não puder
+   ser consultada, diga isso em vez de presumir. Antes de criar
+   função, tipo ou widget, procure no `src/` algo que já resolva e
+   reaproveite ([`docs/CODE_STANDARDS.md`](docs/CODE_STANDARDS.md)).
 2. **Planeje mudanças grandes.** Se a tarefa toca mais de uma
    camada, cria um módulo novo ou altera contratos públicos,
    apresente o plano e aguarde confirmação antes de implementar.

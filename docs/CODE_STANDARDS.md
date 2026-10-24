@@ -2,7 +2,7 @@
 
 **Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-24
 
-Regras para manter o código formatado, verificado, organizado, com nomes claros e sem duplicação.
+Regras para manter o código formatado, verificado, organizado, com nomes claros, baseado na documentação e sem duplicação.
 
 ## Formatação e verificação
 
@@ -48,6 +48,20 @@ Regras:
 - Erros capturados têm nome do que representam (`Err(bind_error)`, `Err(io_error)`), não `e`.
 - Unidades no nome quando o tipo não deixa claro (`timeout_secs`, `max_body_bytes`).
 - Generics (`T`, `E`) e lifetimes (`'a`) são as únicas exceções de uma letra.
+
+## Documentação antes de implementar
+
+Nenhuma implementação começa por suposição. A ordem de consulta é:
+
+1. **Documentação do projeto** (`docs/`) e o código existente.
+2. **Documentação oficial** da ferramenta, crate, API ou módulo usado: docs.rs, guias e exemplos do próprio projeto, documentação da Valve/Steam. Sempre na versão declarada no `Cargo.toml`.
+3. **Solução própria**, só quando nenhuma das duas cobre o caso. Nesse caso, um comentário explica a limitação que levou a ela ([CODE_COMMENTS.md](CODE_COMMENTS.md)).
+
+Regras:
+
+- Use a API como a documentação define. Não invente funções, parâmetros, formatos ou comportamentos.
+- Quando a documentação oferece uma forma recomendada (ex.: padrões do Relm4, extratores do Axum), use essa forma em vez de uma alternativa própria.
+- Comportamento observado e não documentado (ex.: campos do payload GSI) é tratado como incerto: validado em teste com dados reais e nunca apresentado como garantido.
 
 ## Reaproveitamento antes de criar
 
