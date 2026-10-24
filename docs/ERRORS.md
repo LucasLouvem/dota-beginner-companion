@@ -6,7 +6,8 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
 
 ## Padrão
 
-- Cada módulo define o seu próprio tipo de erro: um `enum` com `thiserror`, com nome terminado em `Error` (ex.: `KeyValuesError`).
+- Existe um único contrato de diagnóstico para todos os erros apresentados ao usuário, definido na seção "Contrato central". Os módulos não criam formatos alternativos.
+- Cada módulo representa suas causas com um `enum` tipado usando `thiserror`, com nome terminado em `Error` (ex.: `KeyValuesError`). Esses tipos seguem o mesmo contrato; não são padrões independentes.
 - Cada variante representa **uma causa específica** e carrega o contexto necessário: caminho, porta, linha, causa original.
 - A mensagem (`#[error("...")]`) diz o que falhou e onde, em PT-BR (ex.: "texto entre aspas não terminado na linha 3").
 - Proibido:
@@ -16,7 +17,78 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
   - `unwrap()`/`expect()` em código de produção, exceto quando a falha for impossível. Nesse caso, a mensagem do `expect` diz por quê.
 - Erros nunca contêm o token do GSI nem outros dados sensíveis.
 - Resultados esperados não são erros. Um arquivo ausente ou que precisa de confirmação vira variante de estado (ex.: `GsiConfigState::Missing`), não `Err`.
-- A interface traduz cada erro em um título e uma **ação** para o usuário, nas linhas de status do Diagnóstico.
+- A interface renderiza o diagnóstico padronizado nas linhas de status do Diagnóstico. A classificação da causa e a orientação ficam fora dos widgets.
+
+## Contrato central
+
+Esta seção define o padrão obrigatório para a adequação do código. A centralização ainda não está implementada; o catálogo abaixo descreve os comportamentos atuais.
+
+O contrato e a estrutura do diagnóstico devem ser definidos em um único arquivo, `application/error.rs`. Em Rust, o equivalente a herdar uma estrutura e especializar seu conteúdo é usar composição e traits. Erros específicos preservam seus tipos e causas, mas sua conversão para diagnóstico segue a mesma estrutura central.
+
+| Campo               | Obrigatório                  | Regra                                                                                                                      |
+| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `code`              | Sim                          | Identificador estável em inglês, em `SCREAMING_SNAKE_CASE`, como `GSI_BIND_FAILED`. Não muda quando o texto é revisado.    |
+| `title`             | Sim                          | Título curto em PT-BR que identifica a falha.                                                                              |
+| `cause`             | Sim                          | Explicação em PT-BR do que falhou, com o contexto disponível. Não afirma uma causa que não foi identificada.               |
+| `resolution`        | Sim                          | Instrução simples em PT-BR para resolver ou investigar a falha. Não promete uma solução desconhecida.                      |
+| `technical_details` | Quando houver erro de origem | Detalhes do erro original e sua cadeia de causas, após remoção de dados sensíveis. Não substituem a explicação ao usuário. |
+
+Regras de organização:
+
+- O domínio mantém erros puros e não depende de `application`. A aplicação converte esses erros para o contrato central.
+- Adaptadores preservam os erros de origem usando `source` ou `#[from]`, conforme o caso. A conversão não pode descartar a causa original nem reduzi-la antecipadamente a `String`.
+- O contrato central padroniza o diagnóstico; não exige um enum global com todas as falhas de todas as camadas.
+- Novas classificações recebem códigos únicos e entram neste documento com sua causa e orientação. Nenhum módulo cria uma segunda estrutura de diagnóstico.
+- Campos obrigatórios não podem estar vazios. Códigos não dependem de mensagens de bibliotecas, do idioma ou de valores variáveis como caminhos e portas.
+- Causas são classificadas por variantes e códigos tipados das bibliotecas, quando disponíveis. Não compare trechos de mensagens para decidir o tratamento.
+- Códigos HTTP pertencem somente ao adaptador HTTP do GSI. Erros de arquivo, domínio ou interface não recebem um `statuscode` artificial.
+- A cadeia técnica preservada internamente pode conter contexto sensível; somente sua versão sanitizada pode aparecer na interface, no terminal ou nos logs. Não registre tokens, payloads completos ou dados pessoais para diagnosticar erros.
+
+### Exemplo de diagnóstico conhecido
+
+Exemplo ilustrativo do contrato, sem exigir serialização JSON no aplicativo:
+
+```text
+code: GSI_BIND_FAILED
+title: Servidor GSI não iniciou
+cause: A porta 53000 já está sendo usada.
+resolution: Escolha outra porta na configuração e reinstale o arquivo GSI.
+technical_details: Não foi possível escutar em 127.0.0.1:53000: endereço em uso.
+```
+
+Essa orientação só se aplica quando o erro original identifica porta em uso. Outras causas de falha ao iniciar o servidor precisam de classificação própria ou do tratamento abaixo.
+
+## Causas ainda não classificadas
+
+Uma falha sem correspondência nas causas conhecidas deve continuar sendo propagada como erro, preservando a origem e o contexto da operação. Ela não vira sucesso, não é ignorada e não recebe uma causa conhecida por aproximação.
+
+Na fronteira em que o erro é apresentado ou registrado, use o mesmo contrato central com o código reservado `UNCLASSIFIED_ERROR`:
+
+- `title` identifica a operação que não pôde ser concluída.
+- `cause` informa o contexto conhecido e deixa claro que a causa ainda não foi classificada.
+- `resolution` orienta a consultar os detalhes técnicos para investigação, sem inventar uma correção.
+- `technical_details` mantém a mensagem técnica original disponível e sua cadeia de causas, com dados sensíveis removidos.
+
+Preservar o erro original significa propagá-lo com `Result` e disponibilizar seus detalhes. Não significa provocar `panic!`, usar `unwrap()` ou encerrar o aplicativo indiscriminadamente. Uma operação recuperável informa a falha e permite continuar; uma falha que impede a inicialização encerra o aplicativo com contexto no terminal.
+
+O tratamento de causas desconhecidas é obrigatório, mas não substitui classificações já conhecidas. Depois de investigar uma ocorrência:
+
+1. Identifique a causa a partir do erro original e do contexto.
+2. Acrescente a variante ou o mapeamento específico, com código estável, explicação e orientação adequada.
+3. Atualize o catálogo deste documento.
+4. Adicione um teste de regressão que reproduza a falha e confirme sua classificação.
+
+## Testes do padrão de erros
+
+Além das regras de [TESTING.md](TESTING.md), os testes devem verificar:
+
+- **Causa conhecida:** a falha recebe o código esperado, contexto correto e diagnóstico com todos os campos obrigatórios preenchidos.
+- **Causa desconhecida:** o diagnóstico recebe `UNCLASSIFIED_ERROR`, preserva os detalhes disponíveis e não se passa por uma causa conhecida.
+- **Preservação:** a conversão mantém o erro original e sua cadeia de causas acessíveis; não guarda apenas uma mensagem genérica.
+- **Dados sensíveis:** interface, terminal e logs não expõem segredos presentes em erros de origem simulados.
+- **Regressão:** cada causa investigada passa a ter um teste que reproduz a condição e verifica o tratamento específico.
+
+Prefira conferir código, contexto e conteúdo necessário à orientação. Não compare frases inteiras quando a redação exata não fizer parte do comportamento exigido. Os testes devem provocar a condição de falha com entradas controladas ou fakes, sem depender de erros reais da máquina do desenvolvedor.
 
 ## Catálogo
 

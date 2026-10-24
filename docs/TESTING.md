@@ -12,6 +12,86 @@ Regras e organização dos testes do projeto.
 - Os testes não alteram arquivos fora de diretórios temporários.
 - Um teste verifica um comportamento. Dois comportamentos viram dois testes.
 
+## Resultados esperados e qualidade das verificações
+
+Cada teste define uma entrada controlada, executa a operação e compara o resultado com uma expectativa explícita e independente da implementação testada. Um comportamento pode exigir várias verificações complementares no mesmo teste.
+
+- **Sucesso:** confira valores relevantes, estado resultante e efeitos observáveis. Um status HTTP 200/201, `is_ok()` ou a existência de um objeto não bastam quando o contrato inclui conteúdo ou efeitos.
+- **Erro:** confira a causa específica, o código e o contexto esperado. Verifique também efeitos que não podem ocorrer, como sobrescrever um arquivo sem confirmação ou publicar um evento de aceitação após recusar a entrada.
+- **Expectativa independente:** use valores explícitos ou fixtures revisadas. Não calcule o resultado esperado pela própria função testada nem pela mesma lógica de produção que determina a propriedade em verificação.
+- **JSON:** compare estruturas e valores esperados, incluindo a ausência de campos proibidos. Não dependa de indentação ou ordem das chaves. Conferir apenas a presença de um nome de campo não verifica seu valor.
+- **Arquivos:** confira conteúdo, caminho e preservação ou backup dos dados anteriores, conforme o contrato. Use conteúdo esperado independente para validar o formato gerado.
+- **Mensagens:** confira o texto exato quando a mensagem fizer parte do contrato do projeto. Mensagens de bibliotecas ou do sistema operacional podem variar; nesses casos, confira a causa tipada e o contexto, sem fixar a redação externa.
+- **Campos variáveis:** valide propriedades concretas, como horário dentro do intervalo da operação, porta atribuída válida e caminho de backup existente com o conteúdo correto. Não ignore esses campos sem verificar suas garantias.
+- **Assíncrono:** limite a espera por eventos e confira sua ordem e conteúdo quando fizerem parte do contrato. A ausência de eventos esperados deve produzir uma falha de teste, sem espera indefinida.
+
+Exemplo de contrato GSI: ao receber um payload com `auth.token` e `map.game_state` igual a `X`, o teste deve verificar HTTP 200, evento de aceitação, JSON igual a `{"map":{"game_state":"X"}}` e classificação correta como evento do jogo. Um token inválido deve produzir HTTP 401 e rejeição por token inválido, sem publicar aceitação.
+
+Para os erros padronizados, siga também [ERRORS.md](ERRORS.md#testes-do-padrão-de-erros): valide os campos obrigatórios, a causa conhecida ou `UNCLASSIFIED_ERROR`, a preservação da origem e a remoção de dados sensíveis. Cada falha investigada recebe teste de regressão.
+
+### Exemplos de código ruim e bom
+
+Os exemplos abaixo são ilustrativos e independentes das funções do projeto. Usam `serde_json` para mostrar a diferença entre aceitar qualquer resultado e conferir um contrato explícito. No código real, aplique as mesmas verificações à saída da operação testada.
+
+**Ruim: sucesso sem conferir o conteúdo.** Este teste passa mesmo que o valor de `game_state` esteja errado ou que campos obrigatórios estejam ausentes.
+
+```rust
+#[test]
+fn parses_game_state_without_checking_values() {
+    let result = serde_json::from_str::<serde_json::Value>(
+        r#"{"map":{"game_state":"PLAYING"},"is_test":false}"#,
+    );
+
+    assert!(result.is_ok());
+}
+```
+
+**Bom: sucesso com resultado esperado explícito.** A comparação verifica a estrutura completa, os valores e a ausência de campos extras, sem depender da formatação do JSON.
+
+```rust
+#[test]
+fn parses_expected_game_state_and_test_flag() {
+    let payload = serde_json::from_str::<serde_json::Value>(
+        r#"{"map":{"game_state":"PLAYING"},"is_test":false}"#,
+    )
+    .expect("a entrada do teste deve ser um JSON válido");
+
+    let expected = serde_json::json!({
+        "map": { "game_state": "PLAYING" },
+        "is_test": false,
+    });
+
+    assert_eq!(payload, expected);
+}
+```
+
+**Ruim: erro sem identificar a causa.** Qualquer falha faria o teste passar, inclusive uma diferente da esperada.
+
+```rust
+#[test]
+fn rejects_json_without_checking_error_cause() {
+    let result = serde_json::from_str::<serde_json::Value>("{]");
+
+    assert!(result.is_err());
+}
+```
+
+**Bom: erro com causa e contexto definidos.** O teste verifica a categoria e a localização da falha, sem depender da mensagem externa da biblioteca.
+
+```rust
+#[test]
+fn rejects_invalid_json_with_syntax_error_at_expected_position() {
+    let parse_error = serde_json::from_str::<serde_json::Value>("{]")
+        .expect_err("a entrada malformada deve ser recusada");
+
+    assert_eq!(parse_error.classify(), serde_json::error::Category::Syntax);
+    assert_eq!(parse_error.line(), 1);
+    assert_eq!(parse_error.column(), 2);
+}
+```
+
+Esses exemplos verificam somente a conversão JSON. Um teste da aplicação também precisa verificar os efeitos do seu contrato: evento emitido, estado publicado, conteúdo gravado ou preservação de dados após uma falha. Testar apenas a biblioteca não substitui testar o comportamento da aplicação.
+
 ## Nomes dos testes
 
 O nome do teste diz o que está sendo verificado, para que a saída do `cargo test` explique sozinha o que passou ou falhou. Ele é uma frase em inglês, em `snake_case`, com o comportamento esperado e a condição.
@@ -29,13 +109,28 @@ O nome do teste diz o que está sendo verificado, para que a saída do `cargo te
 
 ## Organização
 
-| Tipo                     | Onde                                                    | Como                                                                          |
-| ------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Unitário                 | Módulo `#[cfg(test)] mod tests` no mesmo arquivo        | Testa funções e tipos daquele módulo                                          |
-| Casos de uso             | `application/use_cases`, com os fakes de `test_support` | Ports substituídos por implementações em memória                              |
-| Adaptadores              | No próprio módulo do adaptador                          | Diretório temporário (`tempfile`), `/proc` falso, servidor local na porta `0` |
-| Integração entre camadas | `tests/`                                                | Fluxo completo usando fakes dos ports                                         |
-| Dados de exemplo         | `tests/fixtures/`                                       | Arquivos reais anonimizados (VDF, payloads GSI)                               |
+A organização aprovada separa a implementação dos testes em arquivos distintos. A migração ainda não foi realizada: atualmente os testes unitários estão em blocos internos de `src/`, e `tests/` contém apenas uma fixture.
+
+| Tipo                         | Local definido                                                    | Como                                                                                                     |
+| ---------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Unitário                     | `tests/unit/<caminho do módulo>/<nome>_tests.rs`                  | Espelha o caminho a partir de `src/`, preservando o acesso aos itens privados como módulo de teste filho |
+| Casos de uso                 | `tests/unit/application/use_cases/`                               | Ports substituídos por fakes em memória                                                                  |
+| Adaptadores isolados         | `tests/unit/gsi/` e `tests/unit/infrastructure/`                  | Diretórios temporários, `/proc` falso e servidores locais conforme o comportamento                       |
+| Integração entre componentes | `tests/integration/`, registrado por `tests/integration_tests.rs` | Verifica contratos e efeitos do fluxo entre componentes                                                  |
+| Ponta a ponta (E2E)          | `tests/e2e_tests.rs`                                              | Exercita o aplicativo completo por suas interfaces externas                                              |
+| Auxiliares compartilhados    | `tests/support/`                                                  | Fakes e preparação, importados somente pelos testes                                                      |
+| Dados de exemplo             | `tests/fixtures/`                                                 | Arquivos anonimizados e resultados esperados revisados                                                   |
+
+Por exemplo, `src/domain/keyvalues.rs` corresponde a `tests/unit/domain/keyvalues_tests.rs`.
+
+Regras de ligação e compilação:
+
+- O arquivo de produção mantém somente a declaração do módulo de testes com `#[cfg(test)]` e `#[path = "..."]`, apontando para o arquivo espelhado. O caminho é relativo ao arquivo que declara o módulo.
+- O arquivo espelhado é um módulo filho e pode acessar itens privados do pai por `super`. Não torne funções públicas apenas para testá-las.
+- Corpos de testes, fakes e auxiliares ficam fora de `src/` e não entram no binário de produção.
+- O Cargo descobre arquivos `.rs` diretamente na raiz de `tests/` como executáveis independentes. Os arquivos nas subpastas precisam ser declarados pelos respectivos módulos ou pontos de entrada; movê-los sem registrar não executa os testes.
+- Testes de integração que importam a aplicação precisam de uma biblioteca em `src/lib.rs`, expondo apenas a API necessária. Essa biblioteca ainda não existe; a separação dos unitários não depende dela.
+- Integração não é sinônimo de E2E: testar dois componentes conectados não exige iniciar o aplicativo completo.
 
 Por camada:
 
