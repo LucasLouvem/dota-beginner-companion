@@ -22,26 +22,26 @@ pub fn init() {
 }
 
 /// Texto traduzido para o idioma do sistema.
-pub fn t(msgid: &str) -> String {
+pub fn translate(msgid: &str) -> String {
     gettextrs::gettext(msgid)
 }
 
 /// Traduz e substitui cada `{}` pelos argumentos, em ordem.
-pub fn tf(msgid: &str, args: &[&str]) -> String {
-    let mut out = String::new();
-    let mut rest = t(msgid);
+pub fn translate_with(msgid: &str, args: &[&str]) -> String {
+    let mut translated = String::new();
+    let mut rest = translate(msgid);
     for arg in args {
         match rest.split_once("{}") {
             Some((before, after)) => {
-                out.push_str(before);
-                out.push_str(arg);
+                translated.push_str(before);
+                translated.push_str(arg);
                 rest = after.to_owned();
             }
             None => break,
         }
     }
-    out.push_str(&rest);
-    out
+    translated.push_str(&rest);
+    translated
 }
 
 #[cfg(test)]
@@ -49,8 +49,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tf_substitutes_in_order() {
-        assert_eq!(tf("{} de {}", &["1", "2"]), "1 de 2");
-        assert_eq!(tf("sem marcador", &["x"]), "sem marcador");
+    fn replaces_each_placeholder_with_the_next_argument() {
+        assert_eq!(translate_with("{} de {}", &["1", "2"]), "1 de 2");
+    }
+
+    #[test]
+    fn keeps_text_unchanged_when_there_are_no_placeholders() {
+        assert_eq!(translate_with("sem marcador", &["x"]), "sem marcador");
+    }
+
+    #[test]
+    fn keeps_extra_placeholders_when_arguments_run_out() {
+        assert_eq!(translate_with("{} e {}", &["1"]), "1 e {}");
     }
 }

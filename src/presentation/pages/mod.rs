@@ -4,7 +4,7 @@ pub mod diagnostics;
 
 use relm4::adw;
 
-use super::i18n::{t, tf};
+use super::i18n::{translate, translate_with};
 
 /// Página de status com título, descrição e a fase do plano que traz o conteúdo da aba.
 pub fn planned_page(title: &str, phase: u8, description: &str) -> adw::StatusPage {
@@ -14,7 +14,7 @@ pub fn planned_page(title: &str, phase: u8, description: &str) -> adw::StatusPag
         .description(format!(
             "{}\n\n{}",
             description,
-            tf("Disponível na Fase {} do projeto.", &[&phase.to_string()])
+            translate_with("Disponível na Fase {} do projeto.", &[&phase.to_string()])
         ))
         .build()
 }
@@ -24,58 +24,62 @@ pub fn tabs() -> Vec<(&'static str, String, adw::StatusPage)> {
     vec![
         (
             "hero",
-            t("Herói"),
+            translate("Herói"),
             planned_page(
-                &t("Herói"),
+                &translate("Herói"),
                 2,
-                &t("Mostrará o herói que você escolheu, atributos, funções e habilidades."),
+                &translate("Mostrará o herói que você escolheu, atributos, funções e habilidades."),
             ),
         ),
         (
             "abilities",
-            t("Habilidades"),
+            translate("Habilidades"),
             planned_page(
-                &t("Habilidades"),
+                &translate("Habilidades"),
                 3,
-                &t("Mostrará a ordem de habilidades mais usada, com o tamanho da amostra."),
+                &translate("Mostrará a ordem de habilidades mais usada, com o tamanho da amostra."),
             ),
         ),
         (
             "items",
-            t("Itens"),
+            translate("Itens"),
             planned_page(
-                &t("Itens"),
+                &translate("Itens"),
                 3,
-                &t(
+                &translate(
                     "Mostrará sugestões estatísticas de itens com frequência, momento de compra e fonte.",
                 ),
             ),
         ),
         (
             "pro",
-            t("Dados profissionais"),
+            translate("Dados profissionais"),
             planned_page(
-                &t("Dados profissionais"),
+                &translate("Dados profissionais"),
                 3,
-                &t("Mostrará partidas profissionais recentes do patch atual usadas nas sugestões."),
+                &translate(
+                    "Mostrará partidas profissionais recentes do patch atual usadas nas sugestões.",
+                ),
             ),
         ),
         (
             "history",
-            t("Histórico"),
+            translate("Histórico"),
             planned_page(
-                &t("Histórico"),
+                &translate("Histórico"),
                 4,
-                &t("Mostrará suas partidas anteriores e o resumo pós-partida."),
+                &translate("Mostrará suas partidas anteriores e o resumo pós-partida."),
             ),
         ),
         (
             "settings",
-            t("Configurações"),
+            translate("Configurações"),
             planned_page(
-                &t("Configurações"),
+                &translate("Configurações"),
                 2,
-                &t("Permitirá ajustar porta, bibliotecas Steam, chaves de API e limpar o cache."),
+                &translate(
+                    "Permitirá ajustar porta, bibliotecas Steam, chaves de API e limpar o cache.",
+                ),
             ),
         ),
     ]

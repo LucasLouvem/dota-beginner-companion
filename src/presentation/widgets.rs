@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use relm4::adw::prelude::*;
 use relm4::{adw, gtk};
 
-use super::i18n::{t, tf};
+use super::i18n::{translate, translate_with};
 
 /// Gravidade de uma linha de status.
 #[derive(Debug, Clone, Copy)]
@@ -25,10 +25,14 @@ pub fn status_row(level: Level, title: &str, subtitle: &str) -> adw::ActionRow {
         .subtitle_selectable(true)
         .build();
     let (icon, class, tooltip) = match level {
-        Level::Ok => ("emblem-ok-symbolic", "success", t("OK")),
-        Level::Warning => ("dialog-warning-symbolic", "warning", t("Atenção")),
-        Level::Error => ("dialog-error-symbolic", "error", t("Erro")),
-        Level::Info => ("dialog-information-symbolic", "dim-label", t("Informação")),
+        Level::Ok => ("emblem-ok-symbolic", "success", translate("OK")),
+        Level::Warning => ("dialog-warning-symbolic", "warning", translate("Atenção")),
+        Level::Error => ("dialog-error-symbolic", "error", translate("Erro")),
+        Level::Info => (
+            "dialog-information-symbolic",
+            "dim-label",
+            translate("Informação"),
+        ),
     };
     let image = gtk::Image::from_icon_name(icon);
     image.add_css_class(class);
@@ -57,20 +61,20 @@ pub fn boxed_list() -> gtk::ListBox {
 pub fn format_time(at: SystemTime) -> String {
     let secs = at
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+        .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or_default();
     let clock = relm4::gtk::glib::DateTime::from_unix_local(secs)
-        .and_then(|d| d.format("%H:%M:%S"))
-        .map(|s| s.to_string())
+        .and_then(|local_time| local_time.format("%H:%M:%S"))
+        .map(|formatted| formatted.to_string())
         .unwrap_or_default();
     let ago = SystemTime::now()
         .duration_since(at)
         .unwrap_or_default()
         .as_secs();
     let relative = match ago {
-        0..60 => tf("há {} s", &[&ago.to_string()]),
-        60..3600 => tf("há {} min", &[&(ago / 60).to_string()]),
-        _ => tf("há {} h", &[&(ago / 3600).to_string()]),
+        0..60 => translate_with("há {} s", &[&ago.to_string()]),
+        60..3600 => translate_with("há {} min", &[&(ago / 60).to_string()]),
+        _ => translate_with("há {} h", &[&(ago / 3600).to_string()]),
     };
     format!("{clock} ({relative})")
 }

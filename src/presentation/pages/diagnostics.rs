@@ -14,7 +14,7 @@ use crate::application::state::{
 };
 use crate::domain::diagnostics::{DiagnosticReport, GsiConfigState};
 use crate::domain::gsi_config::ConfigMatch;
-use crate::presentation::i18n::{t, tf};
+use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{Level, boxed_list, format_time, section_title, status_row};
 
 /// Sem evento do Dota há mais tempo que isso (heartbeat é 30 s), não
@@ -31,7 +31,7 @@ pub struct DiagnosticsPage {
 
 /// Mensagens recebidas pela página Diagnóstico.
 #[derive(Debug)]
-pub enum DiagnosticsMsg {
+pub enum DiagnosticsMessage {
     Snapshot(Box<AppSnapshot>),
     Run,
     Test,
@@ -51,7 +51,7 @@ pub struct DiagnosticsWidgets {
 
 impl Component for DiagnosticsPage {
     type Init = UnboundedSender<UiCommand>;
-    type Input = DiagnosticsMsg;
+    type Input = DiagnosticsMessage;
     type Output = ();
     type CommandOutput = ();
     type Root = gtk::ScrolledWindow;
@@ -75,10 +75,10 @@ impl Component for DiagnosticsPage {
         content.set_margin_start(16);
         content.set_margin_end(16);
 
-        let title = gtk::Label::new(Some(&t("Diagnóstico")));
+        let title = gtk::Label::new(Some(&translate("Diagnóstico")));
         title.add_css_class("title-1");
         title.set_xalign(0.0);
-        let intro = gtk::Label::new(Some(&t(
+        let intro = gtk::Label::new(Some(&translate(
             "Verifica se o Dota 2 foi encontrado, se o arquivo do Game State Integration (GSI) \
              está instalado e se o aplicativo está recebendo dados. Nada aqui altera o jogo.",
         )));
@@ -93,54 +93,55 @@ impl Component for DiagnosticsPage {
         buttons.set_column_spacing(8);
         buttons.set_row_spacing(8);
         buttons.set_max_children_per_line(3);
-        let run_button = gtk::Button::with_label(&t("Executar diagnóstico"));
-        let test_button = gtk::Button::with_label(&t("Testar conexão"));
-        let install_button = gtk::Button::with_label(&t("Instalar configuração GSI"));
+        let run_button = gtk::Button::with_label(&translate("Executar diagnóstico"));
+        let test_button = gtk::Button::with_label(&translate("Testar conexão"));
+        let install_button = gtk::Button::with_label(&translate("Instalar configuração GSI"));
         install_button.add_css_class("suggested-action");
         install_button.set_sensitive(false);
         {
-            let s = sender.clone();
-            run_button.connect_clicked(move |_| s.input(DiagnosticsMsg::Run));
-            let s = sender.clone();
-            test_button.connect_clicked(move |_| s.input(DiagnosticsMsg::Test));
-            let s = sender.clone();
-            install_button.connect_clicked(move |_| s.input(DiagnosticsMsg::Install));
+            let button_sender = sender.clone();
+            run_button.connect_clicked(move |_| button_sender.input(DiagnosticsMessage::Run));
+            let button_sender = sender.clone();
+            test_button.connect_clicked(move |_| button_sender.input(DiagnosticsMessage::Test));
+            let button_sender = sender.clone();
+            install_button
+                .connect_clicked(move |_| button_sender.input(DiagnosticsMessage::Install));
         }
-        for b in [&run_button, &test_button, &install_button] {
-            buttons.insert(b, -1);
+        for button in [&run_button, &test_button, &install_button] {
+            buttons.insert(button, -1);
         }
         content.append(&buttons);
 
         let dota_list = boxed_list();
-        content.append(&section_title(&t("Dota 2")));
+        content.append(&section_title(&translate("Dota 2")));
         content.append(&dota_list);
 
         let server_list = boxed_list();
-        content.append(&section_title(&t("Conexão GSI")));
+        content.append(&section_title(&translate("Conexão GSI")));
         content.append(&server_list);
 
         let requirements = boxed_list();
         requirements.append(&status_row(
             Level::Info,
-            &t("Opção de inicialização obrigatória"),
-            &t(
+            &translate("Opção de inicialização obrigatória"),
+            &translate(
                 "Na Steam: Dota 2 → Propriedades → Geral → Opções de inicialização → \
                 adicione -gamestateintegration. Sem ela o Dota não envia dados.",
             ),
         ));
         requirements.append(&status_row(
             Level::Info,
-            &t("O que o GSI informa"),
-            &t(
+            &translate("O que o GSI informa"),
+            &translate(
                 "Confirmado pelo jogo: fase da partida (seleção de herói, pré-jogo, em andamento, \
                 pós-jogo), seu herói, seus itens, suas habilidades e suas estatísticas. \
                 Não informado: \"partida encontrada\" (será apenas inferido, recurso experimental) \
                 e dados de outros jogadores. O Dota normalmente não envia nada no menu principal.",
             ),
         ));
-        let config_row = status_row(Level::Info, &t("Configuração do aplicativo"), "");
+        let config_row = status_row(Level::Info, &translate("Configuração do aplicativo"), "");
         requirements.append(&config_row);
-        content.append(&section_title(&t("Requisitos e limitações")));
+        content.append(&section_title(&translate("Requisitos e limitações")));
         content.append(&requirements);
 
         let json_source = gtk::Label::new(None);
@@ -164,7 +165,7 @@ impl Component for DiagnosticsPage {
         let json_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
         json_box.append(&json_source);
         json_box.append(&json_scroll);
-        let expander = gtk::Expander::new(Some(&t("Último JSON recebido")));
+        let expander = gtk::Expander::new(Some(&translate("Último JSON recebido")));
         expander.set_child(Some(&json_box));
         content.append(&expander);
 
@@ -194,12 +195,12 @@ impl Component for DiagnosticsPage {
     fn update_with_view(
         &mut self,
         widgets: &mut Self::Widgets,
-        msg: Self::Input,
+        message: Self::Input,
         sender: ComponentSender<Self>,
         root: &Self::Root,
     ) {
-        match msg {
-            DiagnosticsMsg::Snapshot(snapshot) => {
+        match message {
+            DiagnosticsMessage::Snapshot(snapshot) => {
                 self.snapshot = *snapshot;
                 if self.snapshot.install_attempt != self.handled_install {
                     self.handled_install = self.snapshot.install_attempt;
@@ -211,9 +212,9 @@ impl Component for DiagnosticsPage {
                 }
                 self.render(widgets);
             }
-            DiagnosticsMsg::Run => self.send(UiCommand::RunDiagnostics),
-            DiagnosticsMsg::Test => self.send(UiCommand::TestConnection),
-            DiagnosticsMsg::Install => {
+            DiagnosticsMessage::Run => self.send(UiCommand::RunDiagnostics),
+            DiagnosticsMessage::Test => self.send(UiCommand::TestConnection),
+            DiagnosticsMessage::Install => {
                 if let Some(root) = self.first_library() {
                     self.send(UiCommand::InstallGsiConfig {
                         install_root: root,
@@ -221,7 +222,7 @@ impl Component for DiagnosticsPage {
                     });
                 }
             }
-            DiagnosticsMsg::ConfirmOverwrite => {
+            DiagnosticsMessage::ConfirmOverwrite => {
                 if let Some(root) = self.first_library() {
                     self.send(UiCommand::InstallGsiConfig {
                         install_root: root,
@@ -244,7 +245,7 @@ impl DiagnosticsPage {
             .as_ref()?
             .installs
             .first()
-            .map(|c| c.install.library.clone())
+            .map(|check| check.install.library.clone())
     }
 
     fn render(&mut self, widgets: &DiagnosticsWidgets) {
@@ -252,16 +253,18 @@ impl DiagnosticsPage {
         widgets
             .install_button
             .set_sensitive(self.first_library().is_some());
-        widgets.config_row.set_subtitle(&tf(
+        widgets.config_row.set_subtitle(&translate_with(
             "{} — guarda a porta e o token do GSI. Não compartilhe este arquivo.",
             &[&snapshot.config_path.display().to_string()],
         ));
 
         widgets.dota_list.remove_all();
         match &snapshot.diagnostics {
-            None => widgets
-                .dota_list
-                .append(&status_row(Level::Info, &t("Verificando…"), "")),
+            None => {
+                widgets
+                    .dota_list
+                    .append(&status_row(Level::Info, &translate("Verificando…"), ""))
+            }
             Some(report) => {
                 for row in dota_rows(report) {
                     widgets.dota_list.append(&row);
@@ -278,15 +281,19 @@ impl DiagnosticsPage {
         }
 
         let latest = latest_event(snapshot);
-        let raw = latest.map(|(e, _)| Arc::clone(&e.raw));
+        let raw = latest.map(|(event, _)| Arc::clone(&event.raw));
         if raw.as_ref().map(Arc::as_ptr) != self.shown_raw.as_ref().map(Arc::as_ptr) {
             widgets.json_buffer.set_text(raw.as_deref().unwrap_or(""));
             self.shown_raw = raw;
         }
         widgets.json_source.set_label(&match latest {
-            None => t("Nenhum evento recebido ainda."),
-            Some((e, true)) => tf("Origem: teste manual · {}", &[&format_time(e.at)]),
-            Some((e, false)) => tf("Origem: Dota 2 · {}", &[&format_time(e.at)]),
+            None => translate("Nenhum evento recebido ainda."),
+            Some((event, true)) => {
+                translate_with("Origem: teste manual · {}", &[&format_time(event.at)])
+            }
+            Some((event, false)) => {
+                translate_with("Origem: Dota 2 · {}", &[&format_time(event.at)])
+            }
         });
     }
 }
@@ -295,8 +302,8 @@ impl DiagnosticsPage {
 fn latest_event(snapshot: &AppSnapshot) -> Option<(&ReceivedEvent, bool)> {
     let gsi = &snapshot.gsi;
     match (&gsi.last_dota_event, &gsi.last_test_event) {
-        (Some(d), Some(test)) if test.at > d.at => Some((test, true)),
-        (Some(d), _) => Some((d, false)),
+        (Some(dota_event), Some(test)) if test.at > dota_event.at => Some((test, true)),
+        (Some(dota_event), _) => Some((dota_event, false)),
         (None, Some(test)) => Some((test, true)),
         (None, None) => None,
     }
@@ -307,32 +314,32 @@ fn dota_rows(report: &DiagnosticReport) -> Vec<adw::ActionRow> {
     rows.push(if report.dota_process_running {
         status_row(
             Level::Ok,
-            &t("Dota 2 está aberto"),
-            &t("Detectado pela lista de processos do sistema (dota2)."),
+            &translate("Dota 2 está aberto"),
+            &translate("Detectado pela lista de processos do sistema (dota2)."),
         )
     } else {
         status_row(
             Level::Info,
-            &t("Dota 2 não está aberto"),
-            &t("Nenhum processo dota2 encontrado. Normal se o jogo estiver fechado."),
+            &translate("Dota 2 não está aberto"),
+            &translate("Nenhum processo dota2 encontrado. Normal se o jogo estiver fechado."),
         )
     });
 
     if report.installs.is_empty() {
         let searched = if report.searched_libraries.is_empty() {
-            t("nenhuma biblioteca Steam encontrada")
+            translate("nenhuma biblioteca Steam encontrada")
         } else {
             report
                 .searched_libraries
                 .iter()
-                .map(|p| p.display().to_string())
+                .map(|library| library.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         };
         rows.push(status_row(
             Level::Error,
-            &t("Dota 2 não encontrado"),
-            &tf(
+            &translate("Dota 2 não encontrado"),
+            &translate_with(
                 "Bibliotecas verificadas: {}. Adicione a sua em extra_libraries no arquivo de configuração.",
                 &[&searched],
             ),
@@ -342,14 +349,14 @@ fn dota_rows(report: &DiagnosticReport) -> Vec<adw::ActionRow> {
     for check in &report.installs {
         let install = &check.install;
         let kind = match (install.native_binary, install.proton_prefix) {
-            (true, false) => t("versão nativa Linux"),
-            (true, true) => t("versão nativa Linux; também há prefixo Proton"),
-            (false, true) => t("prefixo Proton"),
-            (false, false) => t("tipo de execução desconhecido"),
+            (true, false) => translate("versão nativa Linux"),
+            (true, true) => translate("versão nativa Linux; também há prefixo Proton"),
+            (false, true) => translate("prefixo Proton"),
+            (false, false) => translate("tipo de execução desconhecido"),
         };
         rows.push(status_row(
             Level::Ok,
-            &t("Dota 2 encontrado"),
+            &translate("Dota 2 encontrado"),
             &format!("{} ({kind})", install.game_root.display()),
         ));
 
@@ -357,34 +364,34 @@ fn dota_rows(report: &DiagnosticReport) -> Vec<adw::ActionRow> {
         let (level, title, detail) = match &check.config {
             GsiConfigState::Missing => (
                 Level::Warning,
-                t("Arquivo GSI não instalado"),
-                tf("{} — use \"Instalar configuração GSI\".", &[&path]),
+                translate("Arquivo GSI não instalado"),
+                translate_with("{} — use \"Instalar configuração GSI\".", &[&path]),
             ),
             GsiConfigState::Present(ConfigMatch::Matches) => {
-                (Level::Ok, t("Arquivo GSI instalado"), path)
+                (Level::Ok, translate("Arquivo GSI instalado"), path)
             }
             GsiConfigState::Present(ConfigMatch::UriMismatch { found }) => (
                 Level::Warning,
-                t("Arquivo GSI aponta para outro endereço"),
-                tf(
+                translate("Arquivo GSI aponta para outro endereço"),
+                translate_with(
                     "{} — encontrado: {}. Reinstale para usar a porta atual.",
                     &[&path, found.as_deref().unwrap_or("?")],
                 ),
             ),
             GsiConfigState::Present(ConfigMatch::TokenMismatch) => (
                 Level::Warning,
-                t("Token do arquivo GSI diferente do aplicativo"),
-                tf("{} — reinstale para atualizar o token.", &[&path]),
+                translate("Token do arquivo GSI diferente do aplicativo"),
+                translate_with("{} — reinstale para atualizar o token.", &[&path]),
             ),
-            GsiConfigState::Present(ConfigMatch::Unparsable(e)) => (
+            GsiConfigState::Present(ConfigMatch::Unparsable(parse_error)) => (
                 Level::Error,
-                t("Arquivo GSI inválido"),
-                format!("{path} — {e}"),
+                translate("Arquivo GSI inválido"),
+                format!("{path} — {parse_error}"),
             ),
-            GsiConfigState::Unreadable(e) => (
+            GsiConfigState::Unreadable(read_error) => (
                 Level::Error,
-                t("Não foi possível ler o arquivo GSI"),
-                format!("{path} — {e}"),
+                translate("Não foi possível ler o arquivo GSI"),
+                format!("{path} — {read_error}"),
             ),
         };
         rows.push(status_row(level, &title, &detail));
@@ -396,36 +403,36 @@ fn install_row(outcome: &InstallOutcome) -> adw::ActionRow {
     match outcome {
         InstallOutcome::Created(path) => status_row(
             Level::Ok,
-            &t("Arquivo GSI criado"),
-            &tf(
+            &translate("Arquivo GSI criado"),
+            &translate_with(
                 "{} — reinicie o Dota 2 para ele ser lido.",
                 &[&path.display().to_string()],
             ),
         ),
         InstallOutcome::Unchanged(path) => status_row(
             Level::Ok,
-            &t("Arquivo GSI já estava atualizado"),
+            &translate("Arquivo GSI já estava atualizado"),
             &path.display().to_string(),
         ),
         InstallOutcome::Replaced { path, backup } => status_row(
             Level::Ok,
-            &t("Arquivo GSI substituído"),
-            &tf(
+            &translate("Arquivo GSI substituído"),
+            &translate_with(
                 "{} — cópia do arquivo anterior em {}. Reinicie o Dota 2.",
                 &[&path.display().to_string(), &backup.display().to_string()],
             ),
         ),
         InstallOutcome::NeedsConfirmation(path) => status_row(
             Level::Warning,
-            &t("Instalação aguardando confirmação"),
-            &tf(
+            &translate("Instalação aguardando confirmação"),
+            &translate_with(
                 "{} já existe e é diferente. Nada foi alterado.",
                 &[&path.display().to_string()],
             ),
         ),
         InstallOutcome::Failed { path, error } => status_row(
             Level::Error,
-            &t("Falha ao instalar o arquivo GSI"),
+            &translate("Falha ao instalar o arquivo GSI"),
             &format!("{} — {error}", path.display()),
         ),
     }
@@ -434,18 +441,20 @@ fn install_row(outcome: &InstallOutcome) -> adw::ActionRow {
 fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
     let gsi = &snapshot.gsi;
     let mut rows = vec![match &gsi.server {
-        ServerState::Starting => status_row(Level::Info, &t("Iniciando servidor local…"), ""),
-        ServerState::Listening(addr) => status_row(
+        ServerState::Starting => {
+            status_row(Level::Info, &translate("Iniciando servidor local…"), "")
+        }
+        ServerState::Listening(address) => status_row(
             Level::Ok,
-            &tf("Servidor ouvindo em {}", &[&addr.to_string()]),
-            &t("Aceita apenas conexões deste computador e com o token correto."),
+            &translate_with("Servidor ouvindo em {}", &[&address.to_string()]),
+            &translate("Aceita apenas conexões deste computador e com o token correto."),
         ),
-        ServerState::Failed(e) => status_row(
+        ServerState::Failed(server_error) => status_row(
             Level::Error,
-            &t("Servidor local não iniciou"),
-            &tf(
+            &translate("Servidor local não iniciou"),
+            &translate_with(
                 "{} — a porta pode estar em uso. Altere gsi_port na configuração e reinstale o arquivo GSI.",
-                &[e],
+                &[server_error],
             ),
         ),
     }];
@@ -453,8 +462,8 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
     rows.push(match &gsi.last_dota_event {
         None => status_row(
             Level::Warning,
-            &t("Nenhum evento recebido do Dota ainda"),
-            &t(
+            &translate("Nenhum evento recebido do Dota ainda"),
+            &translate(
                 "Confira a opção -gamestateintegration e o arquivo GSI, reinicie o Dota e entre em \
                 uma partida ou lobby (inclusive contra bots).",
             ),
@@ -463,17 +472,17 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
             let recent = event
                 .at
                 .elapsed()
-                .is_ok_and(|d| d.as_secs() <= RECENT_EVENT_SECS);
+                .is_ok_and(|elapsed| elapsed.as_secs() <= RECENT_EVENT_SECS);
             status_row(
                 if recent { Level::Ok } else { Level::Info },
-                &tf(
+                &translate_with(
                     "Eventos recebidos do Dota: {}",
                     &[&gsi.dota_events.to_string()],
                 ),
                 &if recent {
-                    tf("Último: {}", &[&format_time(event.at)])
+                    translate_with("Último: {}", &[&format_time(event.at)])
                 } else {
-                    tf(
+                    translate_with(
                         "Último: {} — sem eventos recentes.",
                         &[&format_time(event.at)],
                     )
@@ -484,30 +493,30 @@ fn server_rows(snapshot: &AppSnapshot) -> Vec<adw::ActionRow> {
 
     if let Some((at, reason)) = gsi.last_rejection {
         let reason = match reason {
-            RejectReason::InvalidToken => t("token inválido"),
-            RejectReason::InvalidJson => t("JSON inválido"),
+            RejectReason::InvalidToken => translate("token inválido"),
+            RejectReason::InvalidJson => translate("JSON inválido"),
         };
         rows.push(status_row(
             Level::Error,
-            &tf("Requisições recusadas: {}", &[&gsi.rejected.to_string()]),
-            &tf("Última: {} ({})", &[&format_time(at), &reason]),
+            &translate_with("Requisições recusadas: {}", &[&gsi.rejected.to_string()]),
+            &translate_with("Última: {} ({})", &[&format_time(at), &reason]),
         ));
     }
 
     match &snapshot.connection_test {
         None => {}
         Some(ConnectionTest::Running) => {
-            rows.push(status_row(Level::Info, &t("Testando conexão…"), ""))
+            rows.push(status_row(Level::Info, &translate("Testando conexão…"), ""))
         }
         Some(ConnectionTest::Passed) => rows.push(status_row(
             Level::Ok,
-            &t("Teste de conexão bem-sucedido"),
-            &t("O servidor local recebeu o evento de teste. Isso não confirma que o Dota está enviando dados."),
+            &translate("Teste de conexão bem-sucedido"),
+            &translate("O servidor local recebeu o evento de teste. Isso não confirma que o Dota está enviando dados."),
         )),
-        Some(ConnectionTest::Failed(e)) => rows.push(status_row(
+        Some(ConnectionTest::Failed(reason)) => rows.push(status_row(
             Level::Error,
-            &t("Teste de conexão falhou"),
-            e,
+            &translate("Teste de conexão falhou"),
+            reason,
         )),
     }
     rows
@@ -519,19 +528,19 @@ fn confirm_overwrite(
     sender: ComponentSender<DiagnosticsPage>,
 ) {
     let dialog = adw::AlertDialog::new(
-        Some(&t("Substituir arquivo GSI existente?")),
-        Some(&tf(
+        Some(&translate("Substituir arquivo GSI existente?")),
+        Some(&translate_with(
             "{} já existe com conteúdo diferente. Uma cópia de segurança será criada antes de substituir.",
             &[&path.display().to_string()],
         )),
     );
-    dialog.add_response("cancel", &t("Cancelar"));
-    dialog.add_response("replace", &t("Substituir com backup"));
+    dialog.add_response("cancel", &translate("Cancelar"));
+    dialog.add_response("replace", &translate("Substituir com backup"));
     dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
     dialog.connect_response(Some("replace"), move |_, _| {
-        sender.input(DiagnosticsMsg::ConfirmOverwrite);
+        sender.input(DiagnosticsMessage::ConfirmOverwrite);
     });
     dialog.present(Some(root));
 }

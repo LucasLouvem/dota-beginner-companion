@@ -9,10 +9,10 @@ use tokio::sync::{mpsc, watch};
 use crate::application::event_bus::UiCommand;
 use crate::application::state::{AppSnapshot, ServerState};
 
-use super::i18n::{t, tf};
+use super::i18n::{translate, translate_with};
 use super::pages::{
     self,
-    diagnostics::{DiagnosticsMsg, DiagnosticsPage},
+    diagnostics::{DiagnosticsMessage, DiagnosticsPage},
 };
 
 /// Canais de comunicação entre a janela e o núcleo.
@@ -41,7 +41,7 @@ impl Component for App {
 
     fn init_root() -> Self::Root {
         adw::ApplicationWindow::builder()
-            .title(t("Dota Beginner Companion"))
+            .title(translate("Dota Beginner Companion"))
             .default_width(1000)
             .default_height(720)
             .width_request(360)
@@ -63,7 +63,11 @@ impl Component for App {
         for (name, title, page) in pages::tabs() {
             stack.add_titled(&page, Some(name), &title);
         }
-        stack.add_titled(diagnostics.widget(), Some("diagnostics"), &t("Diagnóstico"));
+        stack.add_titled(
+            diagnostics.widget(),
+            Some("diagnostics"),
+            &translate("Diagnóstico"),
+        );
         // A aba Diagnóstico abre por padrão.
         stack.set_visible_child_name("diagnostics");
 
@@ -87,12 +91,12 @@ impl Component for App {
         root.set_content(Some(&toolbar));
 
         let mut state = core.state;
-        sender.command(move |out, shutdown| {
+        sender.command(move |output, shutdown| {
             shutdown
                 .register(async move {
                     loop {
                         let snapshot = state.borrow_and_update().clone();
-                        out.emit(Box::new(snapshot));
+                        output.emit(Box::new(snapshot));
                         if state.changed().await.is_err() {
                             break;
                         }
@@ -115,7 +119,8 @@ impl Component for App {
         _root: &Self::Root,
     ) {
         widgets.connection.set_label(&connection_label(&snapshot));
-        self.diagnostics.emit(DiagnosticsMsg::Snapshot(snapshot));
+        self.diagnostics
+            .emit(DiagnosticsMessage::Snapshot(snapshot));
     }
 }
 
@@ -123,15 +128,22 @@ impl Component for App {
 /// reais do Dota recentes; o teste manual não conta.
 fn connection_label(snapshot: &AppSnapshot) -> String {
     match (&snapshot.gsi.server, &snapshot.gsi.last_dota_event) {
-        (ServerState::Failed(_), _) => t("GSI: servidor com erro"),
-        (ServerState::Starting, _) => t("GSI: iniciando…"),
-        (ServerState::Listening(_), None) => t("GSI: aguardando o Dota"),
+        (ServerState::Failed(_), _) => translate("GSI: servidor com erro"),
+        (ServerState::Starting, _) => translate("GSI: iniciando…"),
+        (ServerState::Listening(_), None) => translate("GSI: aguardando o Dota"),
         (ServerState::Listening(_), Some(event)) => {
-            let secs = event.at.elapsed().map(|d| d.as_secs()).unwrap_or_default();
-            if secs <= 90 {
-                t("GSI: recebendo dados do Dota")
+            let elapsed_secs = event
+                .at
+                .elapsed()
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or_default();
+            if elapsed_secs <= 90 {
+                translate("GSI: recebendo dados do Dota")
             } else {
-                tf("GSI: sem dados há {} min", &[&(secs / 60).to_string()])
+                translate_with(
+                    "GSI: sem dados há {} min",
+                    &[&(elapsed_secs / 60).to_string()],
+                )
             }
         }
     }
