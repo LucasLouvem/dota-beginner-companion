@@ -1,0 +1,7 @@
+# Regras do rumdl para os arquivos Markdown do projeto.
+# A formatação (quebra de linha, listas, tabelas) é responsabilidade do dprint.
+
+[global]
+exclude = ["target", "LICENSE"]
+# MD013 (tamanho de linha): o dprint mantém as quebras de linha como escritas.
+disable = ["MD013"]
