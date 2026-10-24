@@ -88,9 +88,9 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Compras na estratégia reduzem o ouro, mas os itens só aparecem no inventário a partir do pré-jogo.
 - `map.clock_time` retrocede entre estados; a ordenação deve considerar a chegada dos eventos, não esse relógio.
 - Não foi observado campo de rota, lane ou posição de jogo. Coordenadas do herói não confirmam uma função na equipe.
-- `map.matchid` foi `"0"` contra bots, impedindo a busca posterior dessas partidas por ID no OpenDota.
+- `map.matchid` é `"0"` contra bots durante a partida. Uma partida completa mostrou que o ID real aparece no `POST_GAME` (ver Fase 2).
 - O inventário é o estado atual, sem histórico completo de compras. Comparar eventos pode indicar alterações, sem garantir a causa de cada alteração.
-- O log não cobre `POST_GAME` nem `win_team`; o comportamento de fim de partida ainda precisa de captura e validação.
+- O log não cobre `POST_GAME` nem `win_team`; o fim de partida foi capturado depois, na verificação da Fase 2.
 
 ## Fase 2 — Normalizador, herói e storage -> Atual
 
@@ -107,6 +107,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Dados estáticos dos heróis (nome, atributo primário, tipo de ataque, funções e habilidades) vêm de um recorte do [odota/dotaconstants](https://github.com/odota/dotaconstants) (MIT) embutido no binário, com fonte, commit e data registrados. Funciona sem rede e é o dado embutido previsto como último fallback dos providers. A atualização pelo OpenDota fica para a Fase 3.
 - Posição (1 a 5) e dificuldade não fazem parte desta fase: nenhuma fonte verificada traz esses campos (o dotaconstants não tem, o GSI não envia e o log não tem lane), e deduzi-los das funções seria inferência apresentada como dado.
 - Sem Steam e Dota no ambiente de desenvolvimento atual, o comportamento com o jogo é validado reenviando ao aplicativo os eventos gravados em `logs/gsi.jsonl`.
+- A aba Herói mantém o último herói e os dados da última partida jogada (resultado, KDA, farm, mortes) depois que a partida termina, até a próxima começar. Decidido pelo mantenedor depois da partida real, em que o card ficava vazio ao voltar ao menu.
 
 **Resultados mínimos esperados:**
 
@@ -121,11 +122,19 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - O fim de partida é coberto por uma fixture sintética, identificada como tal.
 - O storage tem testes de gravação, leitura, expiração por TTL com dado vencido marcado como antigo, limpeza, reabertura, banco corrompido, pasta sem permissão e schema mais novo.
 - Com o log real (849 eventos) reenviado ao app aberto, todos foram aceitos. A aba Herói mostrou Zeus com atributo, ataque e funções dos dados embutidos, as habilidades com os níveis do GSI e a linha do tempo na ordem certa. O botão "Partida encontrada" registrou o evento como manual. A conferência foi feita pela acessibilidade (AT-SPI) e por captura de tela.
+- Partida real completa contra bots com o app aberto (Dragon Knight, vitória, 2.425 eventos, do menu ao pós-jogo), conferida pela acessibilidade contra o log gravado:
+  - a linha do tempo mostrou "Partida encontrada" (inferido), herói escolhido, início e fim da partida com vitória (confirmados pelo GSI) nos mesmos horários de chegada do log;
+  - as 15 subidas de habilidade e as 33 alterações de inventário do log apareceram, com a origem correta;
+  - o Diagnóstico contou 2.425 eventos recebidos e gravados, igual ao arquivo.
+- Observado nessa partida: `map.matchid` passa de `"0"` para o ID real no `POST_GAME`; `win_team` e `player.team_name` permitem o resultado; o estado de carregamento do mapa não apareceu, então não é garantido.
 
 **Em aberto:**
 
 - Fonte verificável para posição (1 a 5) e dificuldade dos heróis.
-- Conferir a aba Herói e os eventos numa partida real contra bots, incluindo o fim da partida (`POST_GAME`, `win_team`), que não está no log disponível.
+- Ao voltar ao menu depois da partida, a aba Herói fica vazia: falta implementar a decisão de manter o último herói e os dados da última partida.
+- Itens aparecem com o nome interno (`item_satanic`); os dados embutidos só têm heróis e habilidades.
+- A linha do tempo trata itens neutros, TP consumido e montagem de itens como entradas e saídas comuns do inventário.
+- Trocar a fixture sintética de fim de partida por um recorte anonimizado da partida real.
 - O escopo cita "cache e configurações" no SQLite. Só o cache foi implementado: a configuração continua no `config.toml` (com o token e permissão `0600`). Falta decidir se alguma configuração deve ir para o SQLite.
 - Marcar "Partida encontrada" reinicia a linha do tempo, como a detecção automática. Falta decidir se o clique manual deve só acrescentar o evento.
 
@@ -164,6 +173,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 - Notificações desligadas por padrão e opt-in, para não serem intrusivas ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
 - Histórico de partidas persistido via `storage` ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
+- Na aba Histórico, cada partida abre uma tela com os dados dela; as últimas partidas jogadas ficam listadas. A apresentação visual é tratada depois do conteúdo.
 - Buscar o histórico pelo SteamID só com consentimento do usuário.
 
 **Resultados mínimos esperados:**
@@ -176,8 +186,8 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 **Em aberto:**
 
 - Com que critérios as partidas são consideradas "semelhantes" na comparação?
-- Capturar e validar fim de partida (`POST_GAME`, `win_team`), ausente no log disponível.
-- Definir o resumo local de partidas contra bots com `matchid: "0"`, sem depender de busca posterior no OpenDota.
+- O ID da partida só chega no `POST_GAME`: definir o que guardar quando o app fechar antes ou esse evento não chegar.
+- Decidir se o histórico e o resumo com dados do GSI saem antes da Fase 3, já que não dependem de dados externos.
 
 ---
 
@@ -193,6 +203,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 | Limite de requisições ou indisponibilidade do OpenDota       | Recomendações sem dados                               | Rate limit local, cache com TTL, dados vencidos marcados e dados embutidos                                   |
 | Amostra pequena de partidas profissionais por herói ou patch | Sugestões pouco confiáveis                            | Amostra mínima configurável e quantidade de partidas sempre visível                                          |
 | Termos de uso de APIs de terceiros                           | Provider pode precisar ser removido                   | Providers desacoplados e STRATZ opcional                                                                     |
+| ID real da partida só chega no `POST_GAME`                   | Sem ID, não há busca posterior no OpenDota            | Guardar o resumo local com os dados do GSI e buscar pelo ID só quando ele existir                            |
 
 ## Mudanças no plano
 
@@ -206,3 +217,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fechamento da Fase 1: `setlocale` aprovado antes das threads, referências futuras removidas das abas e comentários, envio sintético por script e proteção da saída de pânicos. Achados relatados de partidas reais registrados com impactos nas Fases 2 e 4. Conferência visual e envio manual realizados; Fase 1 concluída, com a Fase 2 pendente de confirmação.
 - 2026-10-24 — Fase 2 marcada como atual. Decididos: dados dos heróis embutidos a partir do dotaconstants, posição e dificuldade fora da fase por falta de fonte, storage com `rusqlite` (`bundled`) e validação com o log reenviado ao app enquanto não há Dota no ambiente.
 - 2026-10-24 — Fase 2 implementada na branch `feat/phase-2-game-state-hero-storage`: normalizador do GSI, eventos de partida com origem, linha do tempo, "Partida encontrada" manual, aba Herói com dados embutidos do dotaconstants, cache em SQLite e ferramenta de reenvio do log. Aguardando revisão do mantenedor antes de marcar a fase como concluída.
+- 2026-10-24 — Fase 2 mesclada na `master` e conferida numa partida real completa contra bots: linha do tempo, habilidades, inventário e fim de partida conferem com o log. Registrados o `matchid` real no `POST_GAME`, a decisão de manter o último herói e os dados da última partida na aba Herói, a tela de partida no Histórico e os pontos em aberto de nomes de itens e da linha do tempo.
