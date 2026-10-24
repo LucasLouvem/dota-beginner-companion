@@ -1,0 +1,72 @@
+# Dota Beginner Companion
+
+Aplicativo desktop para Linux que acompanha jogadores iniciantes de Dota 2. Ele roda em uma janela própria e recebe o estado do jogo pelo **Game State Integration (GSI)**, o mecanismo oficial do Dota, por um servidor local em `127.0.0.1`.
+
+Feito para Arch Linux com KDE Plasma (Wayland), em Rust com GTK4 + Relm4.
+
+## Funcionalidades
+
+A tela **Diagnóstico** mostra se tudo está pronto para o GSI funcionar:
+
+- localiza as bibliotecas Steam (padrão, Flatpak, `libraryfolders.vdf` e bibliotecas extras) e a instalação do Dota 2;
+- informa se o Dota 2 está aberto, pela lista de processos do sistema;
+- instala o arquivo `gamestate_integration_dota_companion.cfg` com um clique. Se já existir um arquivo diferente, pede confirmação e faz backup antes de substituir;
+- confere se o arquivo instalado usa a porta e o token atuais do aplicativo;
+- mostra o servidor GSI local, os eventos recebidos do Dota, as requisições recusadas e o horário do último evento;
+- tem o botão **Testar conexão**, que envia um evento de teste ao próprio servidor;
+- exibe o último JSON recebido (sem o token).
+
+A barra de título mostra o estado da conexão GSI.
+
+## Requisitos
+
+- Arch Linux (ou outra distribuição com GTK 4 e libadwaita)
+- `gtk4`, `libadwaita`, `pkgconf`
+- Rust 1.99.1, via [asdf](https://asdf-vm.com/) (`.tool-versions`) ou rustup (`rust-toolchain.toml`)
+
+```sh
+sudo pacman -S gtk4 libadwaita pkgconf
+asdf plugin add rust
+asdf install
+```
+
+## Executar
+
+```sh
+cargo run              # abre o aplicativo
+cargo test             # testes automatizados
+scripts/check.sh       # todas as verificações (ver CONTRIBUTING.md)
+RUST_LOG=debug cargo run   # com logs detalhados
+```
+
+## Configurar o GSI
+
+1. Abra o aplicativo, vá em **Diagnóstico** e clique em **Instalar configuração GSI**.
+2. Na Steam: Dota 2 → Propriedades → Geral → Opções de inicialização, adicione `-gamestateintegration`.
+3. Reinicie o Dota 2 e entre em uma partida ou lobby (contra bots também funciona).
+4. O Diagnóstico passa a mostrar os eventos recebidos.
+
+## Configuração
+
+Arquivo `~/.config/dota-companion/config.toml`. Ele é criado na primeira execução com permissão `0600`.
+
+| Chave             | Padrão                        | Uso                                        |
+| ----------------- | ----------------------------- | ------------------------------------------ |
+| `gsi_port`        | `53000`                       | Porta do servidor GSI local                |
+| `gsi_token`       | gerado automaticamente        | Token que o Dota envia em cada evento      |
+| `extra_libraries` | `["/mnt/jogos/SteamLibrary"]` | Bibliotecas Steam fora dos caminhos padrão |
+
+As variáveis de ambiente abaixo têm prioridade sobre o arquivo. Elas também podem ficar em um `.env` no diretório de execução.
+
+- `DOTA_COMPANION_GSI_PORT`: porta do servidor.
+- `DOTA_COMPANION_EXTRA_LIBRARIES`: bibliotecas extras, separadas por `:`.
+
+Se mudar a porta ou o token, reinstale o arquivo GSI pelo Diagnóstico.
+
+## Documentação
+
+Arquitetura e padrões do projeto estão em [`docs/`](docs/README.md). Para contribuir, veja [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Licença
+
+[GPL-3.0-or-later](LICENSE).
