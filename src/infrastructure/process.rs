@@ -36,7 +36,7 @@ impl ProcessProbe for ProcProbe {
                 .file_name()
                 .to_string_lossy()
                 .bytes()
-                .all(|b| b.is_ascii_digit());
+                .all(|byte| byte.is_ascii_digit());
             is_pid
                 && fs::read_to_string(entry.path().join("comm"))
                     .is_ok_and(|comm| DOTA_PROCESS_NAMES.contains(&comm.trim()))
@@ -48,25 +48,32 @@ impl ProcessProbe for ProcProbe {
 mod tests {
     use super::*;
 
-    fn fake_proc(processes: &[(&str, &str)]) -> tempfile::TempDir {
-        let tmp = tempfile::tempdir().unwrap();
-        for (pid, comm) in processes {
-            let dir = tmp.path().join(pid);
-            fs::create_dir(&dir).unwrap();
-            fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+    /// Cria um `/proc` falso com uma pasta por entrada e o arquivo `comm`.
+    fn fake_proc(entries: &[(&str, &str)]) -> tempfile::TempDir {
+        let proc_root = tempfile::tempdir().unwrap();
+        for (entry_name, process_name) in entries {
+            let entry_dir = proc_root.path().join(entry_name);
+            fs::create_dir(&entry_dir).unwrap();
+            fs::write(entry_dir.join("comm"), format!("{process_name}\n")).unwrap();
         }
-        tmp
+        proc_root
     }
 
     #[test]
-    fn detects_dota_by_process_name() {
-        let tmp = fake_proc(&[("1", "systemd"), ("4242", "dota2")]);
-        assert!(ProcProbe::new(tmp.path().into()).dota_running());
+    fn reports_running_when_a_process_is_named_dota2() {
+        let proc_root = fake_proc(&[("1", "systemd"), ("4242", "dota2")]);
+        assert!(ProcProbe::new(proc_root.path().into()).dota_running());
     }
 
     #[test]
-    fn ignores_other_processes_and_non_pid_entries() {
-        let tmp = fake_proc(&[("1", "systemd"), ("self", "dota2")]);
-        assert!(!ProcProbe::new(tmp.path().into()).dota_running());
+    fn reports_not_running_when_no_process_is_named_dota2() {
+        let proc_root = fake_proc(&[("1", "systemd"), ("2", "steam")]);
+        assert!(!ProcProbe::new(proc_root.path().into()).dota_running());
+    }
+
+    #[test]
+    fn ignores_entries_that_are_not_process_ids() {
+        let proc_root = fake_proc(&[("self", "dota2")]);
+        assert!(!ProcProbe::new(proc_root.path().into()).dota_running());
     }
 }

@@ -37,7 +37,7 @@ impl Default for AppConfig {
 /// Caminho do `config.toml` no diretório de configuração do usuário (XDG).
 pub fn config_path() -> PathBuf {
     directories::ProjectDirs::from("", "", "dota-companion")
-        .map(|d| d.config_dir().join("config.toml"))
+        .map(|project_dirs| project_dirs.config_dir().join("config.toml"))
         .unwrap_or_else(|| PathBuf::from("dota-companion.toml"))
 }
 
@@ -45,11 +45,10 @@ pub fn config_path() -> PathBuf {
 /// `DOTA_COMPANION_GSI_PORT` e `DOTA_COMPANION_EXTRA_LIBRARIES` (separadas por `:`).
 pub fn load_or_init(path: &Path) -> io::Result<AppConfig> {
     let mut config = match fs::read_to_string(path) {
-        Ok(text) => {
-            toml::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => AppConfig::default(),
-        Err(e) => return Err(e),
+        Ok(text) => toml::from_str(&text)
+            .map_err(|toml_error| io::Error::new(io::ErrorKind::InvalidData, toml_error))?,
+        Err(io_error) if io_error.kind() == io::ErrorKind::NotFound => AppConfig::default(),
+        Err(io_error) => return Err(io_error),
     };
     if config.gsi_token.is_empty() {
         config.gsi_token = generate_token()?;
@@ -58,22 +57,22 @@ pub fn load_or_init(path: &Path) -> io::Result<AppConfig> {
 
     if let Some(port) = std::env::var("DOTA_COMPANION_GSI_PORT")
         .ok()
-        .and_then(|p| p.parse().ok())
+        .and_then(|port_text| port_text.parse().ok())
     {
         config.gsi_port = port;
     }
-    if let Ok(extra) = std::env::var("DOTA_COMPANION_EXTRA_LIBRARIES") {
-        config
-            .extra_libraries
-            .extend(std::env::split_paths(&extra).filter(|p| !p.as_os_str().is_empty()));
+    if let Ok(extra_paths) = std::env::var("DOTA_COMPANION_EXTRA_LIBRARIES") {
+        config.extra_libraries.extend(
+            std::env::split_paths(&extra_paths).filter(|library| !library.as_os_str().is_empty()),
+        );
     }
     Ok(config)
 }
 
 /// Grava a configuração com permissão 0600.
 pub fn save(path: &Path, config: &AppConfig) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
+    if let Some(config_dir) = path.parent() {
+        fs::create_dir_all(config_dir)?;
     }
     let text = toml::to_string_pretty(config).map_err(io::Error::other)?;
     let mut file = fs::OpenOptions::new()
@@ -88,7 +87,7 @@ pub fn save(path: &Path, config: &AppConfig) -> io::Result<()> {
 fn generate_token() -> io::Result<String> {
     let mut bytes = [0u8; TOKEN_BYTES];
     getrandom::fill(&mut bytes).map_err(io::Error::other)?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 #[cfg(test)]
@@ -97,26 +96,33 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn generates_token_once_with_private_permissions() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("sub/config.toml");
+    fn first_run_creates_config_with_token_and_private_permissions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_file = temp_dir.path().join("sub/config.toml");
 
-        let first = load_or_init(&path).unwrap();
-        assert_eq!(first.gsi_token.len(), TOKEN_BYTES * 2);
+        let config = load_or_init(&config_file).unwrap();
+        assert_eq!(config.gsi_token.len(), TOKEN_BYTES * 2);
         assert_eq!(
-            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&config_file).unwrap().permissions().mode() & 0o777,
             0o600
         );
-
-        let second = load_or_init(&path).unwrap();
-        assert_eq!(first.gsi_token, second.gsi_token);
     }
 
     #[test]
-    fn rejects_corrupt_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        fs::write(&path, "gsi_port = \"x\"").unwrap();
-        assert!(load_or_init(&path).is_err());
+    fn later_runs_keep_the_same_token() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_file = temp_dir.path().join("config.toml");
+
+        let first_run = load_or_init(&config_file).unwrap();
+        let second_run = load_or_init(&config_file).unwrap();
+        assert_eq!(first_run.gsi_token, second_run.gsi_token);
+    }
+
+    #[test]
+    fn fails_when_config_file_has_invalid_values() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_file = temp_dir.path().join("config.toml");
+        fs::write(&config_file, "gsi_port = \"not a number\"").unwrap();
+        assert!(load_or_init(&config_file).is_err());
     }
 }

@@ -14,8 +14,8 @@ impl ConfigFiles for LocalConfigFiles {
     fn read(&self, path: &Path) -> io::Result<Option<String>> {
         match fs::read_to_string(path) {
             Ok(text) => Ok(Some(text)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e),
+            Err(io_error) if io_error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(io_error) => Err(io_error),
         }
     }
 
@@ -26,24 +26,24 @@ impl ConfigFiles for LocalConfigFiles {
     /// Escreve em arquivo temporário e renomeia, para nunca deixar um `.cfg`
     /// pela metade.
     fn write(&self, path: &Path, contents: &str) -> io::Result<()> {
-        let tmp = path.with_extension("cfg.tmp");
-        fs::write(&tmp, contents)?;
-        fs::rename(&tmp, path).inspect_err(|_| {
-            let _ = fs::remove_file(&tmp);
+        let partial_path = path.with_extension("cfg.tmp");
+        fs::write(&partial_path, contents)?;
+        fs::rename(&partial_path, path).inspect_err(|_| {
+            let _ = fs::remove_file(&partial_path);
         })
     }
 
     fn backup(&self, path: &Path) -> io::Result<PathBuf> {
-        let stamp = SystemTime::now()
+        let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|elapsed| elapsed.as_secs())
             .unwrap_or_default();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let mut backup = path.with_file_name(format!("{name}.bak-{stamp}"));
-        let mut n = 1;
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+        let mut backup = path.with_file_name(format!("{file_name}.bak-{timestamp}"));
+        let mut attempt = 1;
         while backup.exists() {
-            backup = path.with_file_name(format!("{name}.bak-{stamp}-{n}"));
-            n += 1;
+            backup = path.with_file_name(format!("{file_name}.bak-{timestamp}-{attempt}"));
+            attempt += 1;
         }
         fs::copy(path, &backup)?;
         Ok(backup)
@@ -65,43 +65,55 @@ mod tests {
         }
     }
 
+    fn temporary_files_in(dir: &Path) -> usize {
+        fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count()
+    }
+
     #[test]
-    fn installs_into_real_directory_and_backs_up() {
-        let tmp = tempfile::tempdir().unwrap();
-        let outcome = install_gsi_config(&LocalConfigFiles, tmp.path(), &endpoint(), false);
-        let InstallOutcome::Created(path) = outcome else {
+    fn creates_config_in_real_directory_without_leftover_temporary_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let outcome = install_gsi_config(&LocalConfigFiles, temp_dir.path(), &endpoint(), false);
+        let InstallOutcome::Created(config_path) = outcome else {
             panic!("esperava Created, veio {outcome:?}");
         };
-        assert!(path.is_file());
+        assert!(config_path.is_file());
+        assert_eq!(temporary_files_in(config_path.parent().unwrap()), 0);
+    }
 
-        fs::write(&path, "\"other\" {}").unwrap();
-        let outcome = install_gsi_config(&LocalConfigFiles, tmp.path(), &endpoint(), true);
+    #[test]
+    fn keeps_previous_content_in_backup_when_replacing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let InstallOutcome::Created(config_path) =
+            install_gsi_config(&LocalConfigFiles, temp_dir.path(), &endpoint(), false)
+        else {
+            panic!("instalação inicial falhou");
+        };
+        fs::write(&config_path, "\"other\" {}").unwrap();
+
+        let outcome = install_gsi_config(&LocalConfigFiles, temp_dir.path(), &endpoint(), true);
         let InstallOutcome::Replaced { backup, .. } = outcome else {
             panic!("esperava Replaced, veio {outcome:?}");
         };
         assert_eq!(fs::read_to_string(backup).unwrap(), "\"other\" {}");
-        // Sem arquivos temporários sobrando.
-        let leftovers = fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
-            .count();
-        assert_eq!(leftovers, 0);
     }
 
     #[test]
-    fn reports_permission_errors() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o500)).unwrap();
-        if fs::write(tmp.path().join("probe"), "").is_ok() {
+    fn fails_with_path_when_directory_is_not_writable() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(temp_dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        if fs::write(temp_dir.path().join("probe"), "").is_ok() {
             // Executando como root: permissões não se aplicam.
             return;
         }
-        let outcome = install_gsi_config(&LocalConfigFiles, tmp.path(), &endpoint(), false);
+        let outcome = install_gsi_config(&LocalConfigFiles, temp_dir.path(), &endpoint(), false);
         assert!(
             matches!(outcome, InstallOutcome::Failed { .. }),
             "{outcome:?}"
         );
-        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(temp_dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
     }
 }
