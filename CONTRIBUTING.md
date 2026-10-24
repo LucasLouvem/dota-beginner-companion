@@ -32,15 +32,16 @@ scripts/check.sh
 
 ## Padrões
 
-| Assunto                                   | Documento                                        |
-| ----------------------------------------- | ------------------------------------------------ |
-| Fase atual do projeto                     | [`plans/`](plans/)                               |
-| Arquitetura e camadas                     | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)   |
-| Testes (sucesso e erro obrigatórios)      | [`docs/TESTING.md`](docs/TESTING.md)             |
-| Erros                                     | [`docs/ERRORS.md`](docs/ERRORS.md)               |
-| Comentários                               | [`docs/CODE_COMMENTS.md`](docs/CODE_COMMENTS.md) |
-| Documentação                              | [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) |
-| Commits (Conventional Commits, em inglês) | [`docs/COMMITS.md`](docs/COMMITS.md)             |
+| Assunto                                   | Documento                                          |
+| ----------------------------------------- | -------------------------------------------------- |
+| Fase atual do projeto                     | [`plans/`](plans/)                                 |
+| Arquitetura e camadas                     | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)     |
+| Testes (sucesso e erro obrigatórios)      | [`docs/TESTING.md`](docs/TESTING.md)               |
+| Erros                                     | [`docs/ERRORS.md`](docs/ERRORS.md)                 |
+| Padrão de código e reaproveitamento       | [`docs/CODE_STANDARDS.md`](docs/CODE_STANDARDS.md) |
+| Comentários                               | [`docs/CODE_COMMENTS.md`](docs/CODE_COMMENTS.md)   |
+| Documentação                              | [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)   |
+| Commits (Conventional Commits, em inglês) | [`docs/COMMITS.md`](docs/COMMITS.md)               |
 
 ## Pull requests
 

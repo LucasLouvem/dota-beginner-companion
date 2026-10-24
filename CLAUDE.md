@@ -53,6 +53,9 @@ conforme [`docs/COMMITS.md`](docs/COMMITS.md).
    confirmação antes de marcar a próxima como `-> Atual`.
 1. **Entenda antes de mudar.** Leia o código relacionado e o
    documento relevante de `docs/` antes de editar.
+   Antes de criar função, tipo ou widget, procure no `src/` algo
+   que já resolva e reaproveite
+   ([`docs/CODE_STANDARDS.md`](docs/CODE_STANDARDS.md)).
 2. **Planeje mudanças grandes.** Se a tarefa toca mais de uma
    camada, cria um módulo novo ou altera contratos públicos,
    apresente o plano e aguarde confirmação antes de implementar.
@@ -146,16 +149,17 @@ execução; não é um check).
 Leia o documento correspondente sempre que a tarefa envolver o
 tema:
 
-| Tema                               | Documento                                                     |
-| ---------------------------------- | ------------------------------------------------------------- |
-| Plano e fase atual                 | [`plans/`](plans/)                                            |
-| Visão geral e índice               | [`docs/README.md`](docs/README.md)                            |
-| Arquitetura e camadas              | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (já carregado) |
-| Testes                             | [`docs/TESTING.md`](docs/TESTING.md)                          |
-| Erros e falhas                     | [`docs/ERRORS.md`](docs/ERRORS.md)                            |
-| Comentários no código              | [`docs/CODE_COMMENTS.md`](docs/CODE_COMMENTS.md)              |
-| Commits                            | [`docs/COMMITS.md`](docs/COMMITS.md)                          |
-| Escrever ou atualizar documentação | [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)              |
+| Tema                                | Documento                                                     |
+| ----------------------------------- | ------------------------------------------------------------- |
+| Plano e fase atual                  | [`plans/`](plans/)                                            |
+| Visão geral e índice                | [`docs/README.md`](docs/README.md)                            |
+| Arquitetura e camadas               | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (já carregado) |
+| Testes                              | [`docs/TESTING.md`](docs/TESTING.md)                          |
+| Erros e falhas                      | [`docs/ERRORS.md`](docs/ERRORS.md)                            |
+| Padrão de código e reaproveitamento | [`docs/CODE_STANDARDS.md`](docs/CODE_STANDARDS.md)            |
+| Comentários no código               | [`docs/CODE_COMMENTS.md`](docs/CODE_COMMENTS.md)              |
+| Commits                             | [`docs/COMMITS.md`](docs/COMMITS.md)                          |
+| Escrever ou atualizar documentação  | [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)              |
 
 Se uma mudança contrariar algo em `docs/`, **pare**, explique o
 conflito e peça confirmação antes de alterar código ou

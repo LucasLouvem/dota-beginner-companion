@@ -10,7 +10,22 @@ Regras e organização dos testes do projeto.
 - Cada comportamento tem **caso de sucesso e caso de erro**. Exemplos: token válido e token inválido; arquivo criado e falha de permissão; arquivo VDF válido e malformado.
 - Os testes não dependem de rede externa, do Dota instalado, da Steam do desenvolvedor nem da ordem de execução.
 - Os testes não alteram arquivos fora de diretórios temporários.
-- Um teste verifica um comportamento. O nome diz qual é esse comportamento e a condição (`rejects_wrong_or_missing_token`, `asks_before_replacing_and_backs_up`).
+- Um teste verifica um comportamento. Dois comportamentos viram dois testes.
+
+## Nomes dos testes
+
+O nome do teste diz o que está sendo verificado, para que a saída do `cargo test` explique sozinha o que passou ou falhou. Ele é uma frase em inglês, em `snake_case`, com o comportamento esperado e a condição.
+
+| Errado           | Certo                                                           |
+| ---------------- | --------------------------------------------------------------- |
+| `test1`          | `rejects_request_with_wrong_token`                              |
+| `it_works`       | `creates_config_when_none_exists`                               |
+| `reports_errors` | `fails_with_line_when_quote_is_not_closed`                      |
+| `test_install`   | `asks_confirmation_and_keeps_file_when_existing_config_differs` |
+
+- Formatos comuns: `<faz_algo>_when_<condição>`, `fails_when_<condição>`, `rejects_<entrada>_when_<condição>`.
+- Funções auxiliares, fakes, constantes e variáveis dos testes seguem as mesmas regras de nomes do código ([CODE_STANDARDS.md](CODE_STANDARDS.md#nomes)). Exemplos: `fake_proc`, `SingleInstallLocator`, `temp_dir`, `config_path`.
+- Um fake com comportamento não óbvio tem `///` dizendo o que ele simula.
 
 ## Organização
 
@@ -53,5 +68,5 @@ Para rodar um teste ou um módulo específico:
 
 ```sh
 cargo test gsi::server
-cargo test rejects_invalid_json
+cargo test rejects_request_when_body_is_not_json
 ```

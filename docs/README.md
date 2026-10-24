@@ -4,11 +4,12 @@
 
 Índice da documentação técnica do Dota Beginner Companion.
 
-| Documento                            | Conteúdo                                                            |
-| ------------------------------------ | ------------------------------------------------------------------- |
-| [ARCHITECTURE.md](ARCHITECTURE.md)   | Camadas, fluxo de eventos, concorrência e segurança do servidor GSI |
-| [ERRORS.md](ERRORS.md)               | Padrão de erros e catálogo dos erros tratados                       |
-| [TESTING.md](TESTING.md)             | Regras e organização dos testes automatizados                       |
-| [CODE_COMMENTS.md](CODE_COMMENTS.md) | Padrão de comentários no código                                     |
-| [DOCUMENTATION.md](DOCUMENTATION.md) | Padrão para escrever e manter estes documentos                      |
-| [COMMITS.md](COMMITS.md)             | Padrão de mensagens de commit (Conventional Commits)                |
+| Documento                              | Conteúdo                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| [ARCHITECTURE.md](ARCHITECTURE.md)     | Camadas, fluxo de eventos, concorrência e segurança do servidor GSI      |
+| [ERRORS.md](ERRORS.md)                 | Padrão de erros e catálogo dos erros tratados                            |
+| [TESTING.md](TESTING.md)               | Regras e organização dos testes automatizados                            |
+| [CODE_STANDARDS.md](CODE_STANDARDS.md) | Formatação, verificação, organização, nomes e reaproveitamento de código |
+| [CODE_COMMENTS.md](CODE_COMMENTS.md)   | Padrão de comentários no código                                          |
+| [DOCUMENTATION.md](DOCUMENTATION.md)   | Padrão para escrever e manter estes documentos                           |
+| [COMMITS.md](COMMITS.md)               | Padrão de mensagens de commit (Conventional Commits)                     |
