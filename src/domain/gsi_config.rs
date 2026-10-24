@@ -4,7 +4,7 @@
 //! `game/dota/cfg/gamestate_integration/` e envia POSTs JSON para a `uri` de
 //! cada um.
 
-use super::keyvalues::{self, KvValue};
+use super::keyvalues::{self, KeyValue};
 
 /// Nome do arquivo `.cfg` criado por este aplicativo.
 pub const CONFIG_FILE_NAME: &str = "gamestate_integration_dota_companion.cfg";
@@ -30,9 +30,9 @@ impl GsiEndpoint {
 
 /// Gera o conteúdo do arquivo `.cfg` para o endereço e token informados.
 pub fn render(endpoint: &GsiEndpoint) -> String {
-    let mut data = String::new();
-    for key in REQUESTED_DATA {
-        data.push_str(&format!("        \"{key}\" \"1\"\n"));
+    let mut data_lines = String::new();
+    for block in REQUESTED_DATA {
+        data_lines.push_str(&format!("        \"{block}\" \"1\"\n"));
     }
     format!(
         "// Gerado pelo Dota Beginner Companion.\n\
@@ -46,7 +46,7 @@ pub fn render(endpoint: &GsiEndpoint) -> String {
          \x20   \"heartbeat\" \"30.0\"\n\
          \x20   \"data\"\n\
          \x20   {{\n\
-         {data}\
+         {data_lines}\
          \x20   }}\n\
          \x20   \"auth\"\n\
          \x20   {{\n\
@@ -74,26 +74,28 @@ pub enum ConfigMatch {
 pub fn inspect(contents: &str, expected: &GsiEndpoint) -> ConfigMatch {
     let root = match keyvalues::parse(contents) {
         Ok(root) => root,
-        Err(e) => return ConfigMatch::Unparsable(e.to_string()),
+        Err(parse_error) => return ConfigMatch::Unparsable(parse_error.to_string()),
     };
     let Some((_, section)) = root
         .entries()
         .iter()
-        .find(|(_, v)| matches!(v, KvValue::Section(_)))
+        .find(|(_, value)| matches!(value, KeyValue::Section(_)))
     else {
         return ConfigMatch::Unparsable("nenhuma seção encontrada".into());
     };
 
-    let uri = section.get("uri").and_then(KvValue::as_text);
-    if uri.map(|u| u.trim_end_matches('/')) != Some(expected.uri().trim_end_matches('/')) {
+    let uri = section.get("uri").and_then(KeyValue::as_text);
+    if uri.map(|found_uri| found_uri.trim_end_matches('/'))
+        != Some(expected.uri().trim_end_matches('/'))
+    {
         return ConfigMatch::UriMismatch {
             found: uri.map(str::to_owned),
         };
     }
     let token = section
         .get("auth")
-        .and_then(|a| a.get("token"))
-        .and_then(KvValue::as_text);
+        .and_then(|auth| auth.get("token"))
+        .and_then(KeyValue::as_text);
     if token != Some(expected.token.as_str()) {
         return ConfigMatch::TokenMismatch;
     }
@@ -112,34 +114,42 @@ mod tests {
     }
 
     #[test]
-    fn rendered_config_round_trips() {
-        let text = render(&endpoint());
-        assert!(text.contains("\"uri\" \"http://127.0.0.1:53000/\""));
-        assert!(!text.contains("draft"));
-        assert_eq!(inspect(&text, &endpoint()), ConfigMatch::Matches);
+    fn rendered_config_points_to_loopback_and_matches_its_endpoint() {
+        let config = render(&endpoint());
+        assert!(config.contains("\"uri\" \"http://127.0.0.1:53000/\""));
+        assert!(!config.contains("draft"));
+        assert_eq!(inspect(&config, &endpoint()), ConfigMatch::Matches);
     }
 
     #[test]
-    fn detects_mismatches() {
-        let text = render(&endpoint());
-        let other_token = GsiEndpoint {
+    fn reports_token_mismatch_when_app_token_changed() {
+        let config = render(&endpoint());
+        let new_token = GsiEndpoint {
             token: "zzz".into(),
             ..endpoint()
         };
-        assert_eq!(inspect(&text, &other_token), ConfigMatch::TokenMismatch);
+        assert_eq!(inspect(&config, &new_token), ConfigMatch::TokenMismatch);
+    }
 
-        let other_port = GsiEndpoint {
+    #[test]
+    fn reports_uri_mismatch_with_found_uri_when_app_port_changed() {
+        let config = render(&endpoint());
+        let new_port = GsiEndpoint {
             port: 4000,
             ..endpoint()
         };
         assert_eq!(
-            inspect(&text, &other_port),
+            inspect(&config, &new_port),
             ConfigMatch::UriMismatch {
                 found: Some("http://127.0.0.1:53000/".into())
             }
         );
+    }
+
+    #[test]
+    fn reports_unparsable_when_file_is_not_keyvalues() {
         assert!(matches!(
-            inspect("\"x\" {", &endpoint()),
+            inspect("\"broken\" {", &endpoint()),
             ConfigMatch::Unparsable(_)
         ));
     }

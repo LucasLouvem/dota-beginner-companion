@@ -6,7 +6,7 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
 
 ## Padrão
 
-- Cada módulo define o seu próprio tipo de erro: um `enum` com `thiserror`, com nome terminado em `Error` (ex.: `KvError`).
+- Cada módulo define o seu próprio tipo de erro: um `enum` com `thiserror`, com nome terminado em `Error` (ex.: `KeyValuesError`).
 - Cada variante representa **uma causa específica** e carrega o contexto necessário: caminho, porta, linha, causa original.
 - A mensagem (`#[error("...")]`) diz o que falhou e onde, em PT-BR (ex.: "texto entre aspas não terminado na linha 3").
 - Proibido:
@@ -41,7 +41,7 @@ Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicat
 | Arquivo existente diferente na instalação      | "Instalação aguardando confirmação" + diálogo          | Confirmar a substituição; o backup `.bak-<timestamp>` é criado antes |
 | Falha ao criar a pasta, gravar ou fazer backup | "Falha ao instalar o arquivo GSI", com caminho e causa | Corrigir as permissões da pasta `game/dota/cfg`                      |
 
-### Formato KeyValues (`KvError`)
+### Formato KeyValues (`KeyValuesError`)
 
 | Variante                    | Significado                       |
 | --------------------------- | --------------------------------- |

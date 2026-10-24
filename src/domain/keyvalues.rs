@@ -5,44 +5,44 @@ use thiserror::Error;
 
 /// Valor KeyValues: texto ou seção com pares chave/valor em ordem.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KvValue {
+pub enum KeyValue {
     Text(String),
-    Section(Vec<(String, KvValue)>),
+    Section(Vec<(String, KeyValue)>),
 }
 
-impl KvValue {
+impl KeyValue {
     /// Primeiro filho com a chave informada (comparação sem diferenciar maiúsculas,
     /// como a própria Valve faz).
-    pub fn get(&self, key: &str) -> Option<&KvValue> {
+    pub fn get(&self, key: &str) -> Option<&KeyValue> {
         match self {
-            KvValue::Section(entries) => entries
+            KeyValue::Section(entries) => entries
                 .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(key))
-                .map(|(_, v)| v),
-            KvValue::Text(_) => None,
+                .find(|(entry_key, _)| entry_key.eq_ignore_ascii_case(key))
+                .map(|(_, value)| value),
+            KeyValue::Text(_) => None,
         }
     }
 
     /// Conteúdo, se o valor for texto.
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            KvValue::Text(s) => Some(s),
-            KvValue::Section(_) => None,
+            KeyValue::Text(text) => Some(text),
+            KeyValue::Section(_) => None,
         }
     }
 
     /// Pares da seção; vazio se o valor for texto.
-    pub fn entries(&self) -> &[(String, KvValue)] {
+    pub fn entries(&self) -> &[(String, KeyValue)] {
         match self {
-            KvValue::Section(entries) => entries,
-            KvValue::Text(_) => &[],
+            KeyValue::Section(entries) => entries,
+            KeyValue::Text(_) => &[],
         }
     }
 }
 
 /// Erro de sintaxe ao ler um documento KeyValues.
 #[derive(Debug, Error, PartialEq, Eq)]
-pub enum KvError {
+pub enum KeyValuesError {
     #[error("texto entre aspas não terminado na linha {0}")]
     UnterminatedString(usize),
     #[error("'}}' inesperado na linha {0}")]
@@ -55,63 +55,63 @@ pub enum KvError {
 
 #[derive(Debug, PartialEq)]
 enum Token {
-    Str(String),
+    Text(String),
     Open,
     Close,
 }
 
-fn tokenize(input: &str) -> Result<Vec<(Token, usize)>, KvError> {
+fn tokenize(input: &str) -> Result<Vec<(Token, usize)>, KeyValuesError> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
     let mut line = 1;
 
-    while let Some(c) = chars.next() {
-        match c {
+    while let Some(current) = chars.next() {
+        match current {
             '\n' => line += 1,
-            c if c.is_whitespace() => {}
+            whitespace if whitespace.is_whitespace() => {}
             '{' => tokens.push((Token::Open, line)),
             '}' => tokens.push((Token::Close, line)),
             '/' if chars.peek() == Some(&'/') => {
-                for c in chars.by_ref() {
-                    if c == '\n' {
+                for comment_char in chars.by_ref() {
+                    if comment_char == '\n' {
                         line += 1;
                         break;
                     }
                 }
             }
             '"' => {
-                let start = line;
-                let mut s = String::new();
+                let start_line = line;
+                let mut text = String::new();
                 loop {
                     match chars.next() {
-                        None => return Err(KvError::UnterminatedString(start)),
+                        None => return Err(KeyValuesError::UnterminatedString(start_line)),
                         Some('"') => break,
                         Some('\\') => match chars.next() {
-                            Some('n') => s.push('\n'),
-                            Some('t') => s.push('\t'),
-                            Some(other) => s.push(other),
-                            None => return Err(KvError::UnterminatedString(start)),
+                            Some('n') => text.push('\n'),
+                            Some('t') => text.push('\t'),
+                            Some(escaped) => text.push(escaped),
+                            None => return Err(KeyValuesError::UnterminatedString(start_line)),
                         },
-                        Some(c) => {
-                            if c == '\n' {
+                        Some(quoted_char) => {
+                            if quoted_char == '\n' {
                                 line += 1;
                             }
-                            s.push(c);
+                            text.push(quoted_char);
                         }
                     }
                 }
-                tokens.push((Token::Str(s), start));
+                tokens.push((Token::Text(text), start_line));
             }
-            c => {
-                let mut s = String::from(c);
-                while let Some(&n) = chars.peek() {
-                    if n.is_whitespace() || n == '{' || n == '}' || n == '"' {
+            first_char => {
+                let mut text = String::from(first_char);
+                while let Some(&next_char) = chars.peek() {
+                    if next_char.is_whitespace() || matches!(next_char, '{' | '}' | '"') {
                         break;
                     }
-                    s.push(n);
+                    text.push(next_char);
                     chars.next();
                 }
-                tokens.push((Token::Str(s), line));
+                tokens.push((Token::Text(text), line));
             }
         }
     }
@@ -120,32 +120,33 @@ fn tokenize(input: &str) -> Result<Vec<(Token, usize)>, KvError> {
 
 /// Analisa um documento KeyValues e devolve a seção raiz implícita
 /// (normalmente com um único filho, como `"libraryfolders" { ... }`).
-pub fn parse(input: &str) -> Result<KvValue, KvError> {
-    let tokens = tokenize(input)?;
-    let mut iter = tokens.into_iter();
-    let root = parse_section(&mut iter, false)?;
-    Ok(KvValue::Section(root))
+pub fn parse(input: &str) -> Result<KeyValue, KeyValuesError> {
+    let mut tokens = tokenize(input)?.into_iter();
+    let root = parse_section(&mut tokens, false)?;
+    Ok(KeyValue::Section(root))
 }
 
 fn parse_section(
-    iter: &mut impl Iterator<Item = (Token, usize)>,
+    tokens: &mut impl Iterator<Item = (Token, usize)>,
     nested: bool,
-) -> Result<Vec<(String, KvValue)>, KvError> {
+) -> Result<Vec<(String, KeyValue)>, KeyValuesError> {
     let mut entries = Vec::new();
     loop {
-        match iter.next() {
-            None if nested => return Err(KvError::UnclosedSection),
+        match tokens.next() {
+            None if nested => return Err(KeyValuesError::UnclosedSection),
             None => return Ok(entries),
             Some((Token::Close, _)) if nested => return Ok(entries),
-            Some((Token::Close, line)) => return Err(KvError::UnexpectedClose(line)),
-            Some((Token::Open, line)) => return Err(KvError::MissingValue(line)),
-            Some((Token::Str(key), line)) => match iter.next() {
-                Some((Token::Str(value), _)) => entries.push((key, KvValue::Text(value))),
+            Some((Token::Close, line)) => return Err(KeyValuesError::UnexpectedClose(line)),
+            Some((Token::Open, line)) => return Err(KeyValuesError::MissingValue(line)),
+            Some((Token::Text(key), line)) => match tokens.next() {
+                Some((Token::Text(value), _)) => entries.push((key, KeyValue::Text(value))),
                 Some((Token::Open, _)) => {
-                    let child = parse_section(iter, true)?;
-                    entries.push((key, KvValue::Section(child)));
+                    let child = parse_section(tokens, true)?;
+                    entries.push((key, KeyValue::Section(child)));
                 }
-                Some((Token::Close, _)) | None => return Err(KvError::MissingValue(line)),
+                Some((Token::Close, _)) | None => {
+                    return Err(KeyValuesError::MissingValue(line));
+                }
             },
         }
     }
@@ -156,37 +157,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_nested_sections_and_comments() {
-        let doc = r#"
+    fn reads_nested_sections_ignoring_comments_and_key_case() {
+        let document = r#"
             // comentário
             "root"
             {
-                "a"   "1"
-                "sub" { "b" "two words" }
+                "name"   "1"
+                "child" { "inner" "two words" }
                 unquoted value
             }
         "#;
-        let kv = parse(doc).unwrap();
-        let root = kv.get("root").unwrap();
-        assert_eq!(root.get("a").unwrap().as_text(), Some("1"));
+        let parsed = parse(document).unwrap();
+        let root = parsed.get("root").unwrap();
+        assert_eq!(root.get("name").unwrap().as_text(), Some("1"));
         assert_eq!(
-            root.get("SUB").unwrap().get("b").unwrap().as_text(),
+            root.get("CHILD").unwrap().get("inner").unwrap().as_text(),
             Some("two words")
         );
         assert_eq!(root.get("unquoted").unwrap().as_text(), Some("value"));
     }
 
     #[test]
-    fn handles_escapes() {
-        let kv = parse(r#""p" "C:\\Games\\\"x\"""#).unwrap();
-        assert_eq!(kv.get("p").unwrap().as_text(), Some(r#"C:\Games\"x""#));
+    fn unescapes_backslashes_and_quotes_inside_text() {
+        let parsed = parse(r#""path" "C:\\Games\\\"x\"""#).unwrap();
+        assert_eq!(
+            parsed.get("path").unwrap().as_text(),
+            Some(r#"C:\Games\"x""#)
+        );
     }
 
     #[test]
-    fn reports_errors() {
-        assert_eq!(parse(r#""a" { "b" "c""#), Err(KvError::UnclosedSection));
-        assert_eq!(parse(r#""a" "b" }"#), Err(KvError::UnexpectedClose(1)));
-        assert_eq!(parse(r#""a""#), Err(KvError::MissingValue(1)));
-        assert_eq!(parse("\"a"), Err(KvError::UnterminatedString(1)));
+    fn fails_when_section_is_never_closed() {
+        assert_eq!(
+            parse(r#""root" { "key" "value""#),
+            Err(KeyValuesError::UnclosedSection)
+        );
+    }
+
+    #[test]
+    fn fails_with_line_when_closing_brace_has_no_section() {
+        assert_eq!(
+            parse(r#""key" "value" }"#),
+            Err(KeyValuesError::UnexpectedClose(1))
+        );
+    }
+
+    #[test]
+    fn fails_with_line_when_key_has_no_value() {
+        assert_eq!(parse(r#""key""#), Err(KeyValuesError::MissingValue(1)));
+    }
+
+    #[test]
+    fn fails_with_line_when_quote_is_not_closed() {
+        assert_eq!(parse("\"key"), Err(KeyValuesError::UnterminatedString(1)));
     }
 }
