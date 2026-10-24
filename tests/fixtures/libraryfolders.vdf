@@ -1,0 +1,25 @@
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"/home/user/.local/share/Steam"
+		"label"		""
+		"contentid"		"2950527818379642844"
+		"totalsize"		"0"
+		"apps"
+		{
+			"228980"		"172065224"
+		}
+	}
+	"1"
+	{
+		"path"		"/mnt/jogos/SteamLibrary"
+		"label"		""
+		"contentid"		"6167097482890847865"
+		"totalsize"		"983349346304"
+		"apps"
+		{
+			"570"		"77185439380"
+		}
+	}
+}
