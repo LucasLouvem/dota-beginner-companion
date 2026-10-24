@@ -151,10 +151,10 @@ impl Component for DiagnosticsPage {
             Level::Info,
             &translate("O que o GSI informa"),
             &translate(
-                "Confirmado pelo jogo: fase da partida (seleção de herói, pré-jogo, em andamento, \
-                pós-jogo), seu herói, seus itens, suas habilidades e suas estatísticas. \
-                Não informado: \"partida encontrada\" (será apenas inferido, recurso experimental) \
-                e dados de outros jogadores. O Dota normalmente não envia nada no menu principal.",
+                "Os dados recebidos incluem fase da partida, herói, itens, habilidades e \
+                estatísticas do próprio jogador. \
+                \"Partida encontrada\" não é informada diretamente pelo GSI. \
+                Nas partidas observadas, o menu também gerou eventos, sem o bloco map.",
             ),
         ));
         let config_row = status_row(Level::Info, &translate("Configuração do aplicativo"), "");

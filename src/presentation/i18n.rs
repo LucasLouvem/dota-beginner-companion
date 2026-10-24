@@ -54,7 +54,8 @@ pub fn init() -> Result<(), TranslationSetupError> {
     };
 
     let locale_dir = option_env!("DOTA_COMPANION_LOCALEDIR").unwrap_or("/usr/share/locale");
-    // SAFETY: chamada única antes de existirem outras threads.
+    // SAFETY: chamada única na inicialização, antes do runtime Tokio e do GTK.
+    // Nenhuma outra thread pode consultar ou alterar o locale durante a chamada.
     let locale = unsafe { setlocale(LocaleCategory::LcAll, "") };
     if locale.is_none() {
         return Err(TranslationSetupError::LocaleUnsupported);

@@ -1,4 +1,4 @@
-//! Interfaces que os adaptadores (infraestrutura, GSI, providers) implementam.
+//! Interfaces que os adaptadores (infraestrutura e GSI) implementam.
 
 use std::error::Error;
 use std::future::Future;

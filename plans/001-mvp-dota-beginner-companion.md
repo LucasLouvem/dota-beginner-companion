@@ -41,7 +41,7 @@
 - Existem `LICENSE` (GPL-3.0-or-later), `README.md`, `CONTRIBUTING.md`, `.env.example` e `.gitignore`. O `.gitignore` ignora `target/` e `.env`.
 - `cargo fmt --check` e `cargo clippy --all-targets -- -D warnings` passam.
 
-## Fase 1 — Janela, diagnóstico e coletor GSI -> Atual
+## Fase 1 — Janela, diagnóstico e coletor GSI ✓ Concluída
 
 **Depende de:** Fase 0
 
@@ -64,12 +64,33 @@
 - `ss -ltn` mostra a porta do GSI apenas em `127.0.0.1`.
 - Com o `.cfg` instalado e a opção `-gamestateintegration`, uma partida contra bots gera eventos do Dota no Diagnóstico.
 
-**Em aberto:**
+**Verificações e decisões de fechamento:**
 
-- Os resultados mínimos foram verificados com o jogo real: janela, POST com token certo e errado, `ss -ltn` e partidas contra bots.
-- O código ainda não segue [CODE_COMMENTS](../docs/CODE_COMMENTS.md) em dois pontos que citam o futuro: o comentário de `application/ports.rs` menciona providers, e as abas ainda vazias mostram "Disponível na Fase N do projeto.".
-- O uso de `unsafe` para `setlocale` precisa de aprovação.
-- Faltam `scripts/dev.sh` e `scripts/send_test_event.sh`?
+- Os resultados mínimos foram verificados anteriormente com o jogo real: janela, POST com token certo e errado, `ss -ltn` e partidas contra bots.
+- O uso de `unsafe` para `setlocale` foi aprovado pelo mantenedor em 2026-10-24, limitado à inicialização antes de criar threads. A condição está documentada no código.
+- Comentários e abas não citam funcionalidades futuras nem números de fases; abas sem implementação informam a indisponibilidade.
+- `scripts/send_test_event.sh` envia um evento sintético com a configuração do app. `scripts/dev.sh` foi dispensado: `cargo run` já cobre a execução de desenvolvimento.
+- Pânicos recebem saída própria no terminal, sem payload, nome da thread ou backtrace; diagnósticos de tarefas interrompidas preservam seu comportamento.
+
+**Validação de fechamento:**
+
+- Janela aberta e inspecionada visualmente; as seis abas sem conteúdo exibem a mensagem de indisponibilidade, também conferida pela acessibilidade.
+- Envio manual pelo script confirmado no aplicativo aberto. Testes de subprocesso verificam as prioridades da configuração, recusas e proteção da saída de pânicos.
+- `scripts/check.sh` passa com 133 testes unitários e 12 de integração. A Fase 2 permanece pendente de confirmação do mantenedor.
+
+**Observações de partidas reais:**
+
+Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, no registro local `logs/PROMPT-NOTEBOOK.md`. São comportamentos observados, não garantias da API da Valve. O log contém dados pessoais e não deve ser versionado; fixtures precisam ser anonimizadas.
+
+- A sequência observada foi menu (sem `map`), seleção de herói, estratégia, apresentação dos times, carregamento, pré-jogo e partida em andamento.
+- O menu gera eventos com `provider` e `player`, sem `map`.
+- Antes da escolha, `hero` aparece com `id: 0`; nome e ID do herói aparecem depois.
+- Compras na estratégia reduzem o ouro, mas os itens só aparecem no inventário a partir do pré-jogo.
+- `map.clock_time` retrocede entre estados; a ordenação deve considerar a chegada dos eventos, não esse relógio.
+- Não foi observado campo de rota, lane ou posição de jogo. Coordenadas do herói não confirmam uma função na equipe.
+- `map.matchid` foi `"0"` contra bots, impedindo a busca posterior dessas partidas por ID no OpenDota.
+- O inventário é o estado atual, sem histórico completo de compras. Comparar eventos pode indicar alterações, sem garantir a causa de cada alteração.
+- O log não cobre `POST_GAME` nem `win_team`; o comportamento de fim de partida ainda precisa de captura e validação.
 
 ## Fase 2 — Normalizador, herói e storage
 
@@ -94,6 +115,7 @@
 **Em aberto:**
 
 - Qual é a fonte dos dados estáticos dos heróis (atributos, funções, dificuldade): constantes embutidas, OpenDota ou ambas?
+- Fixtures precisam cobrir menu sem `map`, herói com `id: 0`, relógio que retrocede e inventário disponível somente a partir do pré-jogo. Lane e histórico de compras não podem ser tratados como dados confirmados.
 
 ## Fase 3 — Providers e recomendações
 
@@ -142,21 +164,23 @@
 **Em aberto:**
 
 - Com que critérios as partidas são consideradas "semelhantes" na comparação?
+- Capturar e validar fim de partida (`POST_GAME`, `win_team`), ausente no log disponível.
+- Definir o resumo local de partidas contra bots com `matchid: "0"`, sem depender de busca posterior no OpenDota.
 
 ---
 
 ## Riscos
 
-| Risco                                                        | Impacto                                           | Mitigação                                                                                                    |
-| ------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| O Dota exige a opção `-gamestateintegration`                 | Nenhum evento chega e o app parece quebrado       | O Diagnóstico explica a opção e mostra se algum evento foi recebido                                          |
-| O GSI não envia dados no menu principal                      | "Conectado" pode ser confundido com "jogo aberto" | Mostrar separadamente processo aberto e eventos recebidos                                                    |
-| A Valve muda o formato do payload GSI                        | O parser deixa de reconhecer campos               | Campos opcionais e fixtures de payloads reais nos testes                                                     |
-| Steam Flatpak ou Proton usam caminhos diferentes             | Dota não localizado                               | Busca nos caminhos Flatpak, bibliotecas extras configuráveis e lista dos caminhos verificados no Diagnóstico |
-| Porta do GSI já em uso                                       | Servidor não inicia                               | Erro de bind exibido com a porta; porta configurável                                                         |
-| Limite de requisições ou indisponibilidade do OpenDota       | Recomendações sem dados                           | Rate limit local, cache com TTL, dados vencidos marcados e dados embutidos                                   |
-| Amostra pequena de partidas profissionais por herói ou patch | Sugestões pouco confiáveis                        | Amostra mínima configurável e quantidade de partidas sempre visível                                          |
-| Termos de uso de APIs de terceiros                           | Provider pode precisar ser removido               | Providers desacoplados e STRATZ opcional                                                                     |
+| Risco                                                        | Impacto                                               | Mitigação                                                                                                    |
+| ------------------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| O Dota exige a opção `-gamestateintegration`                 | Nenhum evento chega e o app parece quebrado           | O Diagnóstico explica a opção e mostra se algum evento foi recebido                                          |
+| Eventos no menu não incluem `map`                            | Evento recebido pode ser confundido com partida ativa | Separar processo aberto, eventos recebidos e presença de dados de partida                                    |
+| A Valve muda o formato do payload GSI                        | O parser deixa de reconhecer campos                   | Campos opcionais e fixtures de payloads reais nos testes                                                     |
+| Steam Flatpak ou Proton usam caminhos diferentes             | Dota não localizado                                   | Busca nos caminhos Flatpak, bibliotecas extras configuráveis e lista dos caminhos verificados no Diagnóstico |
+| Porta do GSI já em uso                                       | Servidor não inicia                                   | Erro de bind exibido com a porta; porta configurável                                                         |
+| Limite de requisições ou indisponibilidade do OpenDota       | Recomendações sem dados                               | Rate limit local, cache com TTL, dados vencidos marcados e dados embutidos                                   |
+| Amostra pequena de partidas profissionais por herói ou patch | Sugestões pouco confiáveis                            | Amostra mínima configurável e quantidade de partidas sempre visível                                          |
+| Termos de uso de APIs de terceiros                           | Provider pode precisar ser removido                   | Providers desacoplados e STRATZ opcional                                                                     |
 
 ## Mudanças no plano
 
@@ -167,3 +191,4 @@
 - 2026-10-24 — Verificação de formatação e escrita (dprint, rumdl, typos) adicionada às decisões da Fase 0.
 - 2026-10-24 — Fase 1: o código passa a seguir o contrato central de diagnóstico ([ERRORS](../docs/ERRORS.md)) e a organização de testes ([TESTING](../docs/TESTING.md)), com testes unitários em `tests/unit/`, `src/lib.rs` e testes de integração. O relatório de diagnóstico passa do `domain` para a `application`.
 - 2026-10-24 — Fase 1: falhas antes ignoradas passam a ser tratadas. O `.env` é lido sem alterar o ambiente e impede a inicialização se for inválido; as tarefas do núcleo e o gravador de eventos informam interrupções; canais fechados geram 503 no servidor e aviso na interface; tradução e limpeza de temporários registram aviso no log.
+- 2026-10-24 — Fechamento da Fase 1: `setlocale` aprovado antes das threads, referências futuras removidas das abas e comentários, envio sintético por script e proteção da saída de pânicos. Achados relatados de partidas reais registrados com impactos nas Fases 2 e 4. Conferência visual e envio manual realizados; Fase 1 concluída, com a Fase 2 pendente de confirmação.
