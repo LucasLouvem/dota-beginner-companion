@@ -24,6 +24,7 @@ async fn test_event_with_valid_token_reaches_server_as_test() {
     let (endpoint, mut event_receiver) = start_server("secret").await;
 
     HttpConnectionTester::new()
+        .unwrap()
         .send_test_event(&endpoint)
         .await
         .unwrap();
@@ -43,6 +44,7 @@ async fn test_event_with_wrong_token_fails_with_http_status() {
 
     assert_eq!(
         HttpConnectionTester::new()
+            .unwrap()
             .send_test_event(&wrong_token)
             .await,
         Err("HTTP 401 Unauthorized".into())

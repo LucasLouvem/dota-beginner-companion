@@ -14,15 +14,23 @@ pub struct HttpConnectionTester {
     client: reqwest::Client,
 }
 
+/// Falha ao preparar o testador de conexão.
+#[derive(Debug, thiserror::Error)]
+pub enum HttpConnectionTesterError {
+    /// O backend TLS ou o resolvedor DNS do sistema não puderam ser iniciados.
+    #[error("não foi possível criar o cliente HTTP do teste de conexão")]
+    ClientBuild(#[source] reqwest::Error),
+}
+
 impl HttpConnectionTester {
     /// Cria o cliente com timeout de 3 s e sem proxy.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, HttpConnectionTesterError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
             .no_proxy()
             .build()
-            .expect("cliente HTTP local");
-        Self { client }
+            .map_err(HttpConnectionTesterError::ClientBuild)?;
+        Ok(Self { client })
     }
 }
 

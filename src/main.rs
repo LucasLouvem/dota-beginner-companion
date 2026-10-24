@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         )),
         probe: Arc::new(infrastructure::process::ProcProbe::default()),
         files: Arc::new(infrastructure::config_files::LocalConfigFiles),
-        tester: Arc::new(gsi::client::HttpConnectionTester::new()),
+        tester: Arc::new(gsi::client::HttpConnectionTester::new()?),
         recorder: config.gsi_log.clone().map(|log_path| {
             Arc::new(infrastructure::gsi_log_file::JsonLinesGsiRecorder::new(
                 log_path,

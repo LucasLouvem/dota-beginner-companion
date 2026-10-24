@@ -144,7 +144,8 @@ Prefira conferir código, contexto e conteúdo necessário à orientação. Não
 
 ### Teste de conexão
 
-| Situação                                           | Estado                                       | Ação para o usuário                           |
-| -------------------------------------------------- | -------------------------------------------- | --------------------------------------------- |
-| Servidor não respondeu                             | "Teste de conexão falhou", com a causa       | Verificar o estado do servidor no Diagnóstico |
-| Servidor respondeu com status diferente de sucesso | "Teste de conexão falhou", com o status HTTP | Verificar porta e token                       |
+| Situação                                                                                     | Estado                                            | Ação para o usuário                           |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| Servidor não respondeu                                                                       | "Teste de conexão falhou", com a causa            | Verificar o estado do servidor no Diagnóstico |
+| Servidor respondeu com status diferente de sucesso                                           | "Teste de conexão falhou", com o status HTTP      | Verificar porta e token                       |
+| Cliente HTTP não pôde ser criado na inicialização (`HttpConnectionTesterError::ClientBuild`) | O aplicativo encerra e mostra a causa no terminal | Consultar a causa exibida no terminal         |
