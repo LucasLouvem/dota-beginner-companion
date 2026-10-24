@@ -92,7 +92,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - O inventário é o estado atual, sem histórico completo de compras. Comparar eventos pode indicar alterações, sem garantir a causa de cada alteração.
 - O log não cobre `POST_GAME` nem `win_team`; o comportamento de fim de partida ainda precisa de captura e validação.
 
-## Fase 2 — Normalizador, herói e storage
+## Fase 2 — Normalizador, herói e storage -> Atual
 
 **Depende de:** Fase 1
 
@@ -103,19 +103,23 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - "Partida encontrada" é tratada como experimental: é inferida pela entrada na seleção de herói e também tem botão manual, porque o GSI não expõe esse evento diretamente.
 - Todo evento e indicador informa se é confirmado pelo GSI ou inferido, para nunca apresentar inferência como fato.
 - Os campos do payload GSI são opcionais, porque variam por modo de jogo.
-- Persistência local em SQLite na camada `storage` ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
+- Persistência local em SQLite na camada `storage` ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)), com a crate `rusqlite` e a feature `bundled`, para não depender da versão do SQLite do sistema.
+- Dados estáticos dos heróis (nome, atributo primário, tipo de ataque, funções e habilidades) vêm de um recorte do [odota/dotaconstants](https://github.com/odota/dotaconstants) (MIT) embutido no binário, com fonte, commit e data registrados. Funciona sem rede e é o dado embutido previsto como último fallback dos providers. A atualização pelo OpenDota fica para a Fase 3.
+- Posição (1 a 5) e dificuldade não fazem parte desta fase: nenhuma fonte verificada traz esses campos (o dotaconstants não tem, o GSI não envia e o log não tem lane), e deduzi-los das funções seria inferência apresentada como dado.
+- Sem Steam e Dota no ambiente de desenvolvimento atual, o comportamento com o jogo é validado reenviando ao aplicativo os eventos gravados em `logs/gsi.jsonl`.
 
 **Resultados mínimos esperados:**
 
 - Testes com sequências de payloads (fixtures) geram os eventos esperados, na ordem certa. Payloads incompletos ou fora de ordem não geram eventos falsos.
 - Testes do storage cobrem gravação, leitura, expiração por TTL, dado vencido marcado como antigo e limpeza do cache.
-- Em uma partida real ou contra bots, a aba Herói mostra o herói escolhido com nome, atributo, funções, posições, dificuldade e habilidades.
+- Com os eventos gravados reenviados ao aplicativo, a aba Herói mostra o herói escolhido com nome, atributo, tipo de ataque, funções e habilidades.
 - O botão "Partida encontrada" registra o evento como manual.
 
 **Em aberto:**
 
-- Qual é a fonte dos dados estáticos dos heróis (atributos, funções, dificuldade): constantes embutidas, OpenDota ou ambas?
 - Fixtures precisam cobrir menu sem `map`, herói com `id: 0`, relógio que retrocede e inventário disponível somente a partir do pré-jogo. Lane e histórico de compras não podem ser tratados como dados confirmados.
+- Fonte verificável para posição (1 a 5) e dificuldade dos heróis.
+- Conferir a aba Herói e os eventos numa partida real contra bots, incluindo o fim da partida (`POST_GAME`, `win_team`), que não está no log disponível.
 
 ## Fase 3 — Providers e recomendações
 
@@ -192,3 +196,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fase 1: o código passa a seguir o contrato central de diagnóstico ([ERRORS](../docs/ERRORS.md)) e a organização de testes ([TESTING](../docs/TESTING.md)), com testes unitários em `tests/unit/`, `src/lib.rs` e testes de integração. O relatório de diagnóstico passa do `domain` para a `application`.
 - 2026-10-24 — Fase 1: falhas antes ignoradas passam a ser tratadas. O `.env` é lido sem alterar o ambiente e impede a inicialização se for inválido; as tarefas do núcleo e o gravador de eventos informam interrupções; canais fechados geram 503 no servidor e aviso na interface; tradução e limpeza de temporários registram aviso no log.
 - 2026-10-24 — Fechamento da Fase 1: `setlocale` aprovado antes das threads, referências futuras removidas das abas e comentários, envio sintético por script e proteção da saída de pânicos. Achados relatados de partidas reais registrados com impactos nas Fases 2 e 4. Conferência visual e envio manual realizados; Fase 1 concluída, com a Fase 2 pendente de confirmação.
+- 2026-10-24 — Fase 2 marcada como atual. Decididos: dados dos heróis embutidos a partir do dotaconstants, posição e dificuldade fora da fase por falta de fonte, storage com `rusqlite` (`bundled`) e validação com o log reenviado ao app enquanto não há Dota no ambiente.
