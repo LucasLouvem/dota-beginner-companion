@@ -1,13 +1,28 @@
 //! Páginas da janela principal e a lista de abas.
 
 pub mod diagnostics;
+pub mod hero;
 
 use relm4::adw;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::error::SendError;
+
+use crate::application::event_bus::{CoreConnectionError, UiCommand};
 
 use super::i18n::translate;
 
 /// Texto exibido nas abas cujo conteúdo ainda não está disponível.
 const UNAVAILABLE_MESSAGE: &str = "Esta funcionalidade ainda não está disponível";
+
+/// Envia o comando ao núcleo. O canal só fecha se o núcleo parou.
+pub fn send_command(
+    commands: &UnboundedSender<UiCommand>,
+    command: UiCommand,
+) -> Result<(), CoreConnectionError> {
+    commands
+        .send(command)
+        .map_err(|SendError(command)| CoreConnectionError::CommandRejected { command })
+}
 
 /// Página de status com título e indicação de indisponibilidade.
 pub fn planned_page(title: &str) -> adw::StatusPage {
@@ -18,10 +33,9 @@ pub fn planned_page(title: &str) -> adw::StatusPage {
         .build()
 }
 
-/// Abas da janela, exceto Diagnóstico: identificador, título e página.
+/// Abas ainda sem conteúdo: identificador, título e página.
 pub fn tabs() -> Vec<(&'static str, String, adw::StatusPage)> {
     [
-        ("hero", "Herói"),
         ("abilities", "Habilidades"),
         ("items", "Itens"),
         ("pro", "Dados profissionais"),
@@ -36,3 +50,7 @@ pub fn tabs() -> Vec<(&'static str, String, adw::StatusPage)> {
     })
     .collect()
 }
+
+#[cfg(test)]
+#[path = "../../../tests/unit/presentation/pages/mod_tests.rs"]
+mod tests;

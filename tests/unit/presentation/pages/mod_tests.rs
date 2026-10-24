@@ -1,6 +1,7 @@
-//! Testes unitários de `src/presentation/pages/diagnostics.rs`.
+//! Testes unitários de `src/presentation/pages/mod.rs`.
 
 use super::*;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 #[test]

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::mpsc::error::SendError;
 
 use crate::application::diagnostics::{DiagnosticReport, GsiConfigState, InstallCheck};
 use crate::application::error::{Redactor, ToDiagnostic, log_error};
@@ -19,6 +18,8 @@ use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{
     Level, boxed_list, diagnostic_row, format_time, section_title, status_row,
 };
+
+use super::send_command;
 
 /// Sem evento do Dota há mais tempo que isso (heartbeat é 30 s), não
 /// consideramos a conexão ativa.
@@ -45,16 +46,6 @@ pub enum DiagnosticsMessage {
     Test,
     Install,
     ConfirmOverwrite,
-}
-
-/// Envia o comando ao núcleo. O canal só fecha se o núcleo parou.
-pub fn send_command(
-    commands: &UnboundedSender<UiCommand>,
-    command: UiCommand,
-) -> Result<(), CoreConnectionError> {
-    commands
-        .send(command)
-        .map_err(|SendError(command)| CoreConnectionError::CommandRejected { command })
 }
 
 /// Widgets da página Diagnóstico reconstruídos a cada novo estado.
@@ -618,7 +609,3 @@ fn confirm_overwrite(
     });
     dialog.present(Some(root));
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/presentation/pages/diagnostics_tests.rs"]
-mod tests;

@@ -4,21 +4,26 @@ use relm4::adw::prelude::*;
 use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk,
 };
+use std::sync::Arc;
+
 use tokio::sync::{mpsc, watch};
 
 use crate::application::event_bus::UiCommand;
 use crate::application::state::{AppSnapshot, ServerState};
+use crate::domain::hero_catalog::HeroCatalog;
 
 use super::i18n::{translate, translate_with};
 use super::pages::{
     self,
     diagnostics::{DiagnosticsMessage, DiagnosticsPage},
+    hero::{HeroMessage, HeroPage, HeroPageInit},
 };
 
-/// Canais de comunicação entre a janela e o núcleo.
+/// Canais de comunicação entre a janela e o núcleo, e os dados embutidos.
 pub struct CoreHandle {
     pub commands: mpsc::UnboundedSender<UiCommand>,
     pub state: watch::Receiver<AppSnapshot>,
+    pub heroes: Arc<HeroCatalog>,
 }
 
 /// O que a janela recebe do laço que acompanha o núcleo.
@@ -48,6 +53,7 @@ pub async fn forward_snapshots(
 
 /// Componente raiz da janela principal.
 pub struct App {
+    hero: Controller<HeroPage>,
     diagnostics: Controller<DiagnosticsPage>,
 }
 
@@ -79,12 +85,19 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        let hero = HeroPage::builder()
+            .launch(HeroPageInit {
+                commands: core.commands.clone(),
+                catalog: core.heroes,
+            })
+            .detach();
         let diagnostics = DiagnosticsPage::builder()
             .launch(core.commands.clone())
             .detach();
 
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
+        stack.add_titled(hero.widget(), Some("hero"), &translate("Herói"));
         for (name, title, page) in pages::tabs() {
             stack.add_titled(&page, Some(name), &title);
         }
@@ -123,7 +136,7 @@ impl Component for App {
         });
 
         ComponentParts {
-            model: App { diagnostics },
+            model: App { hero, diagnostics },
             widgets: AppWidgets { connection },
         }
     }
@@ -138,6 +151,8 @@ impl Component for App {
         match update {
             CoreUpdate::Snapshot(snapshot) => {
                 widgets.connection.set_label(&connection_label(&snapshot));
+                self.hero
+                    .emit(HeroMessage::Snapshot(Box::new((*snapshot).clone())));
                 self.diagnostics
                     .emit(DiagnosticsMessage::Snapshot(snapshot));
             }
@@ -145,6 +160,7 @@ impl Component for App {
                 widgets
                     .connection
                     .set_label(&translate("GSI: núcleo parado"));
+                self.hero.emit(HeroMessage::CoreStopped);
                 self.diagnostics.emit(DiagnosticsMessage::CoreStopped);
             }
         }

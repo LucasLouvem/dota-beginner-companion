@@ -2,7 +2,8 @@
 # Textos em Markdown ficam de fora: são verificados pelo dprint e pelo rumdl.
 
 [files]
-extend-exclude = ["*.md", "LICENSE", "Cargo.lock", "tests/fixtures/", "target/"]
+# Dados de terceiros (dotaconstants) trazem nomes do jogo, como `exort`.
+extend-exclude = ["*.md", "LICENSE", "Cargo.lock", "tests/fixtures/", "target/", "assets/dotaconstants/"]
 
 # Nomes próprios do projeto e palavras em português usadas nos comentários
 # que o dicionário em inglês confunde com erros.

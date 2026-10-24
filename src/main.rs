@@ -11,6 +11,7 @@ use dota_companion::application::core::{self, CoreDependencies};
 use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::domain::gsi_config::GsiEndpoint;
+use dota_companion::domain::hero_catalog::HeroCatalog;
 use dota_companion::infrastructure::{config, logging};
 use dota_companion::presentation::app::{App, CoreHandle};
 use dota_companion::presentation::widgets::diagnostic_text;
@@ -106,12 +107,22 @@ fn main() -> anyhow::Result<()> {
         Arc::new(state_sender),
     ));
 
+    // Sem os dados embutidos o app segue: a aba Herói mostra só o que o GSI informa.
+    let heroes = infrastructure::hero_data::embedded_catalog().unwrap_or_else(|data_error| {
+        log_error(
+            &data_error.to_diagnostic(&Redactor::default()),
+            "embedded hero data is invalid; hero tab shows GSI data only",
+        );
+        HeroCatalog::default()
+    });
+
     // GTK recebe só o nome do programa; argumentos são nossos.
     RelmApp::new(APP_ID)
         .with_args(Vec::new())
         .run::<App>(CoreHandle {
             commands: command_sender,
             state: state_receiver,
+            heroes: Arc::new(heroes),
         });
     runtime.shutdown_background();
     Ok(())
