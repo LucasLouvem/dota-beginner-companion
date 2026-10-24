@@ -84,6 +84,12 @@ O tratamento de causas desconhecidas é obrigatório, mas não substitui classif
 3. Atualize o catálogo deste documento.
 4. Adicione um teste de regressão que reproduza a falha e confirme sua classificação.
 
+## Saída de pânicos
+
+Pânicos representam falhas internas, não erros recuperáveis. O aplicativo e a ferramenta de envio sintético instalam um hook antes das outras operações. A saída vai diretamente para stderr, independente do filtro de log, com a mensagem "Falha interna (pânico)" e a localização (nome do arquivo, linha e coluna). Sem localização disponível, a mensagem informa essa ausência.
+
+O hook não imprime o payload do pânico, nomes de threads, caminhos completos ou backtrace, mesmo com `RUST_BACKTRACE=full`. Não chama o hook padrão e não converte o pânico em sucesso: tarefas continuam produzindo `JoinError`, e pânicos não recuperados continuam encerrando a execução. Uma falha ao escrever em stderr é ignorada para não provocar um segundo pânico dentro do hook.
+
 ## Testes do padrão de erros
 
 Além das regras de [TESTING.md](TESTING.md), os testes devem verificar:

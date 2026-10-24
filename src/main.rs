@@ -19,15 +19,12 @@ use dota_companion::{application, gsi, infrastructure, presentation};
 const APP_ID: &str = "io.github.dotacompanion.DotaBeginnerCompanion";
 
 fn main() -> anyhow::Result<()> {
+    logging::install_panic_hook();
     // Lido antes do log porque o `.env` pode definir o `RUST_LOG`.
     let env_file = config::read_env_file(Path::new(config::ENV_FILE_NAME));
     let env_values = env_file.as_ref().ok();
     // O ambiente do processo tem prioridade sobre o `.env`, como no dotenvy.
-    let lookup = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .or_else(|| env_values.and_then(|values| values.get(name)))
-    };
+    let lookup = |name: &str| config::lookup_variable(name, env_values);
 
     let (log_filter, log_filter_error) = logging::log_filter(lookup("RUST_LOG").as_deref());
     tracing_subscriber::fmt().with_env_filter(log_filter).init();

@@ -5,4 +5,7 @@ mod integration {
     mod gsi_flow;
     mod harness;
     mod install_flow;
+    mod panic_output;
+    mod process;
+    mod test_event_cli;
 }

@@ -1,10 +1,40 @@
 //! Filtro de log a partir do `RUST_LOG`, com aviso quando há diretiva
 //! inválida em vez de ignorá-la em silêncio.
 
+use std::io::{self, Write};
+use std::path::Path;
+
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::{LevelFilter, ParseError};
 
 use crate::application::error::{Diagnostic, Redactor, ToDiagnostic, UiText};
+
+/// Instala a saída de pânicos antes de criar threads. Não imprime o conteúdo
+/// do pânico, nomes de threads ou backtrace, que podem revelar dados pessoais.
+/// A propagação do pânico permanece sob controle do runtime.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let mut stderr = io::stderr().lock();
+        let result = match info.location() {
+            Some(location) => {
+                let file = Path::new(location.file())
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                writeln!(
+                    stderr,
+                    "Falha interna (pânico) em {file}:{}:{}.",
+                    location.line(),
+                    location.column()
+                )
+            }
+            None => writeln!(stderr, "Falha interna (pânico); localização indisponível."),
+        };
+        // Se o próprio terminal falhar, não há saída alternativa segura aqui.
+        // O hook não pode provocar outro pânico nem imprimir o payload original.
+        let _ = result;
+    }));
+}
 
 /// `RUST_LOG` com uma diretiva que o `tracing` não entende.
 #[derive(Debug, thiserror::Error)]

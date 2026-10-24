@@ -35,6 +35,7 @@ asdf install
 ```sh
 cargo run              # abre o aplicativo
 cargo test             # testes automatizados
+scripts/send_test_event.sh # envia um evento sintético ao app aberto
 scripts/check.sh       # todas as verificações (ver CONTRIBUTING.md)
 RUST_LOG=debug cargo run   # com logs detalhados
 ```
@@ -45,6 +46,12 @@ RUST_LOG=debug cargo run   # com logs detalhados
 2. Na Steam: Dota 2 → Propriedades → Geral → Opções de inicialização, adicione `-gamestateintegration`.
 3. Reinicie o Dota 2 e entre em uma partida ou lobby (contra bots também funciona).
 4. O Diagnóstico passa a mostrar os eventos recebidos.
+
+## Teste manual sem o Dota
+
+Com o aplicativo aberto, execute `scripts/send_test_event.sh` em outro terminal. O script compila e executa o exemplo Rust `send_test_event`, envia um único evento sintético e informa sucesso ou diagnóstico de falha. O evento fica separado dos eventos do jogo no Diagnóstico.
+
+A configuração segue a mesma prioridade do aplicativo: ambiente do processo, `.env` no diretório de execução e `config.toml`. Execute a partir do mesmo diretório usado para abrir o app. Se o `config.toml` ainda não existir, ele é criado como na inicialização normal. O script não imprime o token nem interpreta o `.env` como código shell. Falhas retornam código de saída 1.
 
 ## Configuração
 

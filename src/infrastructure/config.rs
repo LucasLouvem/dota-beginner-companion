@@ -140,6 +140,14 @@ impl EnvFile {
     }
 }
 
+/// Procura uma variável no ambiente do processo e depois no `.env`.
+/// Compartilha a prioridade entre a janela e as ferramentas de desenvolvimento.
+pub fn lookup_variable(name: &str, env_file: Option<&EnvFile>) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .or_else(|| env_file.and_then(|values| values.get(name)))
+}
+
 /// Falha ao ler o `.env`. Um `.env` ausente não é erro.
 #[derive(Debug, thiserror::Error)]
 pub enum EnvFileError {

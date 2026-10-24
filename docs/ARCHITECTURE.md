@@ -69,11 +69,14 @@ O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de te
 - O domínio não conhece o contrato de diagnóstico. A `application` converte os erros dele, e cada erro específico implementa `ToDiagnostic` (`application::error`).
 - A interface converte o erro em `Diagnostic` no momento de exibir, com o `Redactor` do `AppSnapshot`, que remove o token. A mesma linha (`diagnostic_row`) mostra título, causa, resolução, código e detalhes técnicos.
 - Falhas que impedem a inicialização encerram o aplicativo com o mesmo diagnóstico no terminal, sem a cadeia completa do erro.
+- Antes de ler a configuração ou criar threads, o executável instala um hook de pânico em `infrastructure::logging`. Ele escreve diretamente em stderr uma mensagem fixa e o nome do arquivo, linha e coluna, sem payload, nome de thread ou backtrace. Não invoca o hook padrão nem altera a propagação do pânico.
+- O exemplo Rust `send_test_event`, chamado pelo script de teste manual, reutiliza a configuração e o cliente GSI da biblioteca. Envia um único evento marcado como teste, sem iniciar o servidor ou a interface.
 - Códigos HTTP só existem no adaptador `gsi`. Detalhes e catálogo em [ERRORS.md](ERRORS.md).
 
 ## Concorrência
 
 - `main.rs` cria um runtime tokio próprio. O servidor GSI e o laço do núcleo rodam nele.
+- A configuração global de idioma (`setlocale`) roda uma única vez na inicialização, antes do runtime Tokio e do GTK, sem outras threads consultando ou alterando o locale. Esse uso de `unsafe` foi aprovado pelo mantenedor.
 - A thread do GTK só executa a interface. Ela recebe o estado por `watch` dentro de um comando Relm4.
 - Operações de arquivo e de `/proc` rodam em `spawn_blocking`, e o teste de conexão roda em uma tarefa separada. A interface nunca espera por I/O.
 - Quando o log de eventos está ativo (`DOTA_COMPANION_GSI_LOG`), uma única tarefa grava os eventos do Dota um de cada vez, na ordem de chegada. Eventos de teste e requisições recusadas não são gravados.

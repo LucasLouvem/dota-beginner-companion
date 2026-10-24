@@ -143,6 +143,8 @@ Por camada:
 - **gsi**: o router é testado direto com `tower::ServiceExt::oneshot`, sem abrir porta. O bind e o cliente usam servidor real em `127.0.0.1:0`.
 - **infrastructure**: arquivos reais em diretório temporário, incluindo erros de permissão.
 - **presentation**: regras que não dependem de widgets (formatação, traduções) têm teste unitário.
+- **pânicos**: subprocesso isolado instala o hook, provoca uma falha com segredo no payload e no nome da thread e verifica a saída completa, localização e status de falha. O hook global do processo principal dos testes não é alterado.
+- **ferramenta de envio**: o exemplo compilado pelo Cargo roda em subprocesso com ambiente e arquivos temporários. O servidor local verifica evento sintético único; falhas de token e de conexão verificam código de saída, diagnóstico e ausência do token no terminal.
 - **integração**: núcleo real com o servidor GSI em porta livre e arquivos em diretório temporário. Toda espera por uma mudança no `AppSnapshot` tem tempo limite.
 
 ## Comandos
