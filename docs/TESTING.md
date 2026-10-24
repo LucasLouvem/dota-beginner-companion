@@ -130,7 +130,7 @@ Regras de ligação e compilação:
 - O arquivo espelhado é um módulo filho e pode acessar itens privados do pai por `super`. Não torne funções públicas apenas para testá-las.
 - Corpos de testes, fakes e auxiliares ficam fora de `src/` e não entram no binário de produção.
 - O Cargo descobre arquivos `.rs` diretamente na raiz de `tests/` como executáveis independentes. Os arquivos nas subpastas precisam ser declarados pelos respectivos módulos ou pontos de entrada; movê-los sem registrar não executa os testes.
-- Testes de integração que importam a aplicação precisam de uma biblioteca em `src/lib.rs`, expondo apenas a API necessária. Essa biblioteca ainda não existe; a separação dos unitários não depende dela.
+- Testes de integração importam a aplicação pela biblioteca em `src/lib.rs` (`dota_companion::...`), que declara as camadas usadas por `main.rs`.
 - Integração não é sinônimo de E2E: testar dois componentes conectados não exige iniciar o aplicativo completo.
 
 Por camada:

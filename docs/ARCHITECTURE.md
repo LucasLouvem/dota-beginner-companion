@@ -32,6 +32,7 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 | `gsi`            | Servidor GSI (Axum) e cliente do teste de conexão                                                                        | `domain`, `application` |
 | `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos de configuração GSI, `config.toml`                  | `domain`, `application` |
 | `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                        | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                     | todos                   |
 | `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                     | todos                   |
 
 Regras:

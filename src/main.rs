@@ -1,16 +1,6 @@
 //! Composição do aplicativo: cria os adaptadores, inicia o núcleo e o
 //! servidor GSI em um runtime tokio e abre a janela GTK.
 
-mod application;
-mod domain;
-mod gsi;
-mod infrastructure;
-mod presentation;
-
-#[cfg(test)]
-#[path = "../tests/support/mod.rs"]
-mod test_support;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -18,11 +8,12 @@ use anyhow::Context;
 use relm4::RelmApp;
 use tokio::sync::{mpsc, watch};
 
-use application::core::{self, CoreDependencies};
-use application::state::{AppSnapshot, GsiLogStatus};
-use domain::gsi_config::GsiEndpoint;
-use infrastructure::config;
-use presentation::app::{App, CoreHandle};
+use dota_companion::application::core::{self, CoreDependencies};
+use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
+use dota_companion::domain::gsi_config::GsiEndpoint;
+use dota_companion::infrastructure::config;
+use dota_companion::presentation::app::{App, CoreHandle};
+use dota_companion::{application, gsi, infrastructure, presentation};
 
 const APP_ID: &str = "io.github.dotacompanion.DotaBeginnerCompanion";
 
