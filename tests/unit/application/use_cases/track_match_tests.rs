@@ -1,7 +1,8 @@
 //! Testes unitários de `src/application/use_cases/track_match.rs`.
 
 use super::*;
-use crate::domain::game::GamePhase;
+use crate::domain::game::{GamePhase, HeroPick, Team};
+use crate::domain::match_events::MatchResult;
 use crate::domain::match_events::Provenance;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -90,6 +91,7 @@ fn manual_match_found_is_recorded_as_manual_and_keeps_game() {
             at: at(1),
             event: event(MatchEventKind::HeroDied),
         }],
+        last_match: None,
     };
 
     record_manual_match_found(&mut status, at(5));
@@ -126,4 +128,109 @@ fn timeline_keeps_only_the_most_recent_events() {
             level: 5,
         }
     );
+}
+
+fn post_game_won_with(hero: &str) -> GameSnapshot {
+    GameSnapshot {
+        clock_time: Some(1429),
+        hero: HeroPick::Picked {
+            name: hero.into(),
+            id: None,
+        },
+        team: Some(Team::Radiant),
+        winner: Some(Team::Radiant),
+        ..game(GamePhase::PostGame)
+    }
+}
+
+fn match_ended() -> MatchEvent {
+    event(MatchEventKind::MatchEnded {
+        result: MatchResult::Victory,
+    })
+}
+
+#[test]
+fn match_end_keeps_summary_of_the_post_game_state() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+
+    let summary = status.last_match.expect("o fim da partida guarda o resumo");
+    assert_eq!(summary.result, MatchResult::Victory);
+    assert_eq!(summary.duration_secs, Some(1429));
+    assert_eq!(
+        summary.hero,
+        HeroPick::Picked {
+            name: "npc_dota_hero_dragon_knight".into(),
+            id: None,
+        }
+    );
+}
+
+#[test]
+fn last_match_stays_after_returning_to_menu() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+    record_match_update(&mut status, GameSnapshot::menu(), vec![], at(20));
+
+    assert_eq!(status.game, Some(GameSnapshot::menu()));
+    assert!(status.last_match.is_some());
+}
+
+#[test]
+fn next_match_found_clears_last_match() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+    record_match_update(
+        &mut status,
+        game(GamePhase::HeroSelection),
+        vec![MatchEvent {
+            kind: MatchEventKind::MatchFound,
+            provenance: Provenance::Inferred,
+        }],
+        at(20),
+    );
+
+    assert_eq!(status.last_match, None);
+}
+
+#[test]
+fn manual_match_found_also_clears_last_match() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+    record_manual_match_found(&mut status, at(20));
+
+    assert_eq!(status.last_match, None);
+    assert_eq!(status.timeline.len(), 1);
+}
+
+#[test]
+fn events_without_match_end_do_not_create_a_summary() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        game(GamePhase::InProgress),
+        vec![event(MatchEventKind::HeroDied)],
+        at(10),
+    );
+    assert_eq!(status.last_match, None);
 }

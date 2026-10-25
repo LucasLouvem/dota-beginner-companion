@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::domain::game::GameSnapshot;
-use crate::domain::match_events::MatchEvent;
+use crate::domain::match_events::{MatchEvent, MatchSummary};
 
 use super::diagnostics::DiagnosticReport;
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText};
@@ -175,6 +175,9 @@ pub struct MatchStatus {
     pub game: Option<GameSnapshot>,
     /// Eventos da partida atual, do mais antigo ao mais recente.
     pub timeline: Vec<TimelineEntry>,
+    /// Resumo da última partida terminada. Fica disponível até a próxima
+    /// partida ser encontrada.
+    pub last_match: Option<MatchSummary>,
 }
 
 /// Estado completo exibido pela interface.

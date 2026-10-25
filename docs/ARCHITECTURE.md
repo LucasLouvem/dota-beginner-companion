@@ -61,7 +61,7 @@ Nos testes, os casos de uso recebem implementações falsas desses ports. Os tes
 
 1. O Dota envia um POST JSON para `http://127.0.0.1:<porta>/`.
 2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha. Um evento aceito do Dota leva também o estado de jogo normalizado (`gsi::normalize`); cada campo é lido isoladamente, e um bloco vazio (`{}`) significa "sem dado".
-3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual e a linha do tempo da partida.
+3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual, a linha do tempo da partida e o resumo da última partida terminada, que fica disponível até a próxima partida ser encontrada.
 4. A interface recebe cada `AppSnapshot` e atualiza as telas.
 5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI ou marcar "Partida encontrada". O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
 
