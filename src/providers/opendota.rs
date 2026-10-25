@@ -11,7 +11,7 @@ use crate::application::ports::{
 };
 use crate::domain::builds::Purchase;
 use crate::domain::item_catalog::ItemCatalog;
-use crate::domain::match_data::{HeroMatch, MatchDetails, MatchPlayer};
+use crate::domain::match_data::{HeroMatch, MatchDetails, MatchPlayer, PublicMatchSummary};
 use crate::domain::patch::{Patch, PatchCatalog};
 
 use super::http_json::HttpJsonClient;
@@ -61,6 +61,10 @@ fn path(query: &StatsQuery) -> String {
         StatsQuery::Patches => "/constants/patch".into(),
         StatsQuery::HeroMatches { hero_id } => format!("/heroes/{hero_id}/matches"),
         StatsQuery::MatchDetails { match_id } => format!("/matches/{match_id}"),
+        StatsQuery::PublicMatches { less_than_match_id } => match less_than_match_id {
+            Some(match_id) => format!("/publicMatches?less_than_match_id={match_id}"),
+            None => "/publicMatches".into(),
+        },
     }
 }
 
@@ -76,7 +80,9 @@ impl StatsProvider for OpenDotaProvider {
             let value = self.http.get_json(&path, category, budget).await?;
             let kept = match query {
                 StatsQuery::MatchDetails { .. } => reduce_match(&value),
-                StatsQuery::Patches | StatsQuery::HeroMatches { .. } => value,
+                StatsQuery::Patches
+                | StatsQuery::HeroMatches { .. }
+                | StatsQuery::PublicMatches { .. } => value,
             };
             Ok(kept.to_string())
         })
@@ -92,6 +98,10 @@ impl StatsProvider for OpenDotaProvider {
 
     fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError> {
         decode_match_details(raw, &self.items)
+    }
+
+    fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError> {
+        decode_public_matches(raw)
     }
 }
 
@@ -150,6 +160,30 @@ fn decode_hero_matches(raw: &str) -> Result<Vec<HeroMatch>, ProviderError> {
                     .zip(radiant)
                     .map(|(win, radiant)| win == radiant),
                 duration_secs: unsigned(entry, "duration"),
+            })
+        })
+        .collect())
+}
+
+/// `/publicMatches`: lista com `match_id`, `game_mode`, `lobby_type`,
+/// `avg_rank_tier` e `start_time`. Os heróis dos times vêm zerados na
+/// resposta real e não são lidos. Itens sem `match_id` numérico ficam de fora.
+fn decode_public_matches(raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError> {
+    let path = "/publicMatches";
+    let value = parse(raw, path)?;
+    let entries = value.as_array().ok_or(ProviderError::UnexpectedFormat {
+        path: path.into(),
+        detail: "a lista de partidas públicas não é uma lista",
+    })?;
+    Ok(entries
+        .iter()
+        .filter_map(|entry| {
+            Some(PublicMatchSummary {
+                match_id: entry.get("match_id")?.as_u64()?,
+                game_mode: unsigned(entry, "game_mode"),
+                lobby_type: unsigned(entry, "lobby_type"),
+                avg_rank_tier: unsigned(entry, "avg_rank_tier"),
+                start_time: entry.get("start_time").and_then(Value::as_i64),
             })
         })
         .collect())

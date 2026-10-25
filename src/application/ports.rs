@@ -9,9 +9,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use crate::domain::builds::MatchBuild;
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
-use crate::domain::match_data::{HeroMatch, MatchDetails};
+use crate::domain::match_data::{HeroMatch, MatchDetails, PublicMatchSummary};
 use crate::domain::patch::PatchCatalog;
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
@@ -477,6 +478,10 @@ pub enum StatsQuery {
     HeroMatches { hero_id: u32 },
     /// Detalhes de uma partida.
     MatchDetails { match_id: u64 },
+    /// Amostra de partidas públicas com ID menor que `less_than_match_id`
+    /// (as mais recentes, sem ele). Cada resposta é diferente: não vai para
+    /// o cache.
+    PublicMatches { less_than_match_id: Option<u64> },
 }
 
 impl StatsQuery {
@@ -486,6 +491,10 @@ impl StatsQuery {
             StatsQuery::Patches => "stats/patches".into(),
             StatsQuery::HeroMatches { hero_id } => format!("stats/heroes/{hero_id}/matches"),
             StatsQuery::MatchDetails { match_id } => format!("stats/matches/{match_id}"),
+            StatsQuery::PublicMatches { less_than_match_id } => match less_than_match_id {
+                Some(match_id) => format!("stats/public-matches/{match_id}"),
+                None => "stats/public-matches".into(),
+            },
         }
     }
 }
@@ -510,6 +519,45 @@ pub trait StatsProvider: Send + Sync {
 
     /// Detalhes a partir da resposta de `StatsQuery::MatchDetails`.
     fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError>;
+
+    /// Partidas a partir da resposta de `StatsQuery::PublicMatches`.
+    fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError>;
+}
+
+/// Build de um jogador numa partida pública, como é guardada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicBuild {
+    pub match_id: u64,
+    pub hero_id: u32,
+    /// `game_mode` do Dota da partida.
+    pub game_mode: u32,
+    pub patch_id: u32,
+    pub start_time: Option<i64>,
+    /// Rank médio da partida, guardado para um filtro futuro.
+    pub avg_rank_tier: Option<u32>,
+    pub won: bool,
+    pub build: MatchBuild,
+}
+
+/// Builds de partidas públicas e o ponto em que a coleta parou.
+pub trait PublicBuildStore: Send + Sync {
+    /// Grava as builds de uma partida e o cursor da coleta numa única
+    /// transação, para um erro nunca perder o ponto nem gravar pela metade.
+    /// Uma partida já gravada para o herói é ignorada.
+    fn save_match(&self, builds: &[PublicBuild], cursor: u64) -> Result<(), StorageError>;
+    /// ID usado como `less_than_match_id` na próxima consulta.
+    fn cursor(&self) -> Result<Option<u64>, StorageError>;
+    /// Volta a coleta para as partidas mais recentes.
+    fn reset_cursor(&self) -> Result<(), StorageError>;
+    /// Builds do herói nas partidas com um dos `game_modes`, no patch.
+    fn builds(
+        &self,
+        hero_id: u32,
+        game_modes: &[u32],
+        patch_id: u32,
+    ) -> Result<Vec<(MatchBuild, bool)>, StorageError>;
+    /// Apaga as builds de outros patches; devolve quantas saíram.
+    fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError>;
 }
 
 #[cfg(test)]

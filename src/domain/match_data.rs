@@ -3,6 +3,48 @@
 //! inventado. Os itens já estão com o nome interno (`item_black_king_bar`).
 
 use super::builds::{PlayerMatch, Purchase};
+use super::game::GameMode;
+
+/// `game_mode` do Dota (no dotaconstants) da Escolha Livre comum e da
+/// ranqueada, e do Turbo.
+const ALL_PICK_GAME_MODES: [u32; 2] = [1, 22];
+const TURBO_GAME_MODE: u32 = 23;
+/// `lobby_type` de partidas contra bots (cooperativa e local), que não
+/// entram nas estatísticas de partidas entre jogadores.
+const BOT_LOBBY_TYPES: [u32; 2] = [4, 10];
+
+/// Modo usado nas estatísticas para uma partida pública, ou `None` quando
+/// ela não entra (outro modo, ou partida contra bots).
+pub fn collected_mode(game_mode: Option<u32>, lobby_type: Option<u32>) -> Option<GameMode> {
+    if lobby_type.is_some_and(|lobby| BOT_LOBBY_TYPES.contains(&lobby)) {
+        return None;
+    }
+    match game_mode? {
+        mode if ALL_PICK_GAME_MODES.contains(&mode) => Some(GameMode::AllPick),
+        TURBO_GAME_MODE => Some(GameMode::Turbo),
+        _ => None,
+    }
+}
+
+/// `game_mode` das partidas que alimentam as estatísticas de cada modo do
+/// aplicativo. Contra bots usa os dados da Escolha Livre.
+pub fn source_game_modes(mode: GameMode) -> &'static [u32] {
+    match mode {
+        GameMode::AllPick | GameMode::Bots => &ALL_PICK_GAME_MODES,
+        GameMode::Turbo => &[TURBO_GAME_MODE],
+    }
+}
+
+/// Partida da lista pública (amostra aleatória). A lista não revela os
+/// heróis, que vêm dos detalhes da partida.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicMatchSummary {
+    pub match_id: u64,
+    pub game_mode: Option<u32>,
+    pub lobby_type: Option<u32>,
+    pub avg_rank_tier: Option<u32>,
+    pub start_time: Option<i64>,
+}
 
 /// Partida recente com um herói, da lista de candidatas.
 #[derive(Debug, Clone, PartialEq, Eq)]

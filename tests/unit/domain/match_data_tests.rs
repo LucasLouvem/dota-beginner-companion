@@ -65,3 +65,25 @@ fn finds_the_player_with_the_hero() {
     );
     assert_eq!(details(None, None).player_with_hero(49), None);
 }
+
+#[test]
+fn all_pick_ranked_all_pick_and_turbo_are_collected() {
+    assert_eq!(collected_mode(Some(1), Some(0)), Some(GameMode::AllPick));
+    assert_eq!(collected_mode(Some(22), Some(7)), Some(GameMode::AllPick));
+    assert_eq!(collected_mode(Some(23), Some(0)), Some(GameMode::Turbo));
+}
+
+#[test]
+fn bot_lobbies_and_other_modes_are_not_collected() {
+    assert_eq!(collected_mode(Some(1), Some(4)), None);
+    assert_eq!(collected_mode(Some(23), Some(10)), None);
+    assert_eq!(collected_mode(Some(13), Some(14)), None);
+    assert_eq!(collected_mode(None, Some(0)), None);
+}
+
+#[test]
+fn bots_mode_uses_the_all_pick_sources() {
+    assert_eq!(source_game_modes(GameMode::AllPick), [1, 22]);
+    assert_eq!(source_game_modes(GameMode::Bots), [1, 22]);
+    assert_eq!(source_game_modes(GameMode::Turbo), [23]);
+}

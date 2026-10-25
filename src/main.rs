@@ -9,14 +9,24 @@ use tokio::sync::{mpsc, watch};
 
 use dota_companion::application::core::{self, CoreDependencies};
 use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
+use dota_companion::application::ports::{CacheStore, CallBudget, PublicBuildStore, StatsProvider};
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
+use dota_companion::application::use_cases::call_budget::BudgetLimits;
+use dota_companion::application::use_cases::public_collection::{
+    CollectionSources, run_collection,
+};
 use dota_companion::domain::gsi_config::GsiEndpoint;
 use dota_companion::domain::hero_catalog::HeroCatalog;
 use dota_companion::domain::item_catalog::ItemCatalog;
 use dota_companion::infrastructure::{config, logging};
 use dota_companion::presentation::app::{App, CoreHandle};
 use dota_companion::presentation::widgets::diagnostic_text;
-use dota_companion::{application, gsi, infrastructure, presentation};
+use dota_companion::providers::http_json::{HttpJsonClient, HttpJsonConfig};
+use dota_companion::providers::opendota::OpenDotaProvider;
+use dota_companion::storage::call_budget::SqliteCallBudget;
+use dota_companion::storage::public_builds::SqlitePublicBuildStore;
+use dota_companion::storage::sqlite_cache::SqliteCacheStore;
+use dota_companion::{application, gsi, infrastructure, presentation, storage};
 
 const APP_ID: &str = "io.github.dotacompanion.DotaBeginnerCompanion";
 
@@ -120,6 +130,11 @@ fn main() -> anyhow::Result<()> {
         event_receiver,
         Arc::new(state_sender),
     ));
+    // Sem o banco local ou o cliente HTTP o app segue, sem coletar partidas
+    // públicas.
+    if let Some(sources) = collection_sources(&storage::database_path(), &items) {
+        runtime.spawn(run_collection(sources));
+    }
 
     // Sem os dados embutidos o app segue: a aba Herói mostra só o que o GSI informa.
     let heroes = infrastructure::hero_data::embedded_catalog().unwrap_or_else(|data_error| {
@@ -141,6 +156,46 @@ fn main() -> anyhow::Result<()> {
         });
     runtime.shutdown_background();
     Ok(())
+}
+
+/// Dependências da coleta de partidas públicas, ou `None` (com o erro no
+/// log) quando o banco local ou o cliente HTTP não puderam ser abertos.
+fn collection_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<CollectionSources> {
+    let failed = |diagnostic_source: &dyn ToDiagnostic| {
+        log_error(
+            &diagnostic_source.to_diagnostic(&Redactor::default()),
+            "public match collection disabled",
+        );
+    };
+    let budget = SqliteCallBudget::open(database, BudgetLimits::default())
+        .map_err(|storage_error| failed(&storage_error))
+        .ok()?;
+    let store = SqlitePublicBuildStore::open(database)
+        .map_err(|storage_error| failed(&storage_error))
+        .ok()?;
+    let cache = SqliteCacheStore::open(database)
+        .map_err(|storage_error| failed(&storage_error))
+        .ok()?;
+    let http = HttpJsonClient::new(HttpJsonConfig::opendota())
+        .map_err(|client_error| failed(&client_error))
+        .ok()?;
+    let embedded_patches = infrastructure::patch_data::embedded_catalog()
+        .map_err(|data_error| {
+            log_warning(
+                &data_error.to_diagnostic(&Redactor::default()),
+                "embedded patches unavailable; the current patch needs OpenDota",
+            );
+        })
+        .ok();
+    Some(CollectionSources {
+        provider: Arc::new(OpenDotaProvider::new(http, Arc::clone(items)))
+            as Arc<dyn StatsProvider>,
+        budget: Arc::new(budget) as Arc<dyn CallBudget>,
+        store: Arc::new(store) as Arc<dyn PublicBuildStore>,
+        cache: Arc::new(cache) as Arc<dyn CacheStore>,
+        items: Arc::clone(items),
+        embedded_patches,
+    })
 }
 
 /// Falha que impede a inicialização. Só o diagnóstico sanitizado vai para o

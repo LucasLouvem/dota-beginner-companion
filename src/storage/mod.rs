@@ -2,6 +2,7 @@
 //! `application::ports`; o I/O é síncrono e deve rodar em `spawn_blocking`.
 
 pub mod call_budget;
+pub mod public_builds;
 pub mod schema;
 pub mod sqlite_cache;
 

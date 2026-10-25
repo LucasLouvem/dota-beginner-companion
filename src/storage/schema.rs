@@ -36,7 +36,7 @@ const MIGRATIONS: [&str; 2] = [
         hero_id INTEGER NOT NULL,
         game_mode INTEGER NOT NULL,
         patch_id INTEGER NOT NULL,
-        start_time INTEGER NOT NULL,
+        start_time INTEGER,
         avg_rank_tier INTEGER,
         won INTEGER NOT NULL,
         evidence TEXT NOT NULL,

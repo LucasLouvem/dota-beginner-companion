@@ -250,3 +250,55 @@ async fn fetched_match_details_come_reduced_for_the_cache() {
         22
     );
 }
+
+const PUBLIC_MATCHES_RESPONSE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/opendota/public_matches.json"
+));
+
+#[test]
+fn real_public_matches_have_mode_lobby_and_rank() {
+    let summaries = decode_public_matches(PUBLIC_MATCHES_RESPONSE).unwrap();
+
+    assert_eq!(summaries.len(), 100);
+    assert_eq!(
+        summaries[0],
+        PublicMatchSummary {
+            match_id: 9_062_205_691,
+            game_mode: Some(1),
+            lobby_type: Some(4),
+            avg_rank_tier: Some(51),
+            start_time: Some(1_792_970_329),
+        }
+    );
+    let turbo = summaries
+        .iter()
+        .filter(|summary| summary.game_mode == Some(23))
+        .count();
+    assert_eq!(turbo, 81);
+}
+
+#[test]
+fn public_matches_that_are_not_a_list_have_unexpected_format() {
+    let error = decode_public_matches(r#"{"matches": []}"#).unwrap_err();
+    assert!(
+        matches!(error, ProviderError::UnexpectedFormat { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn public_matches_path_carries_the_cursor() {
+    assert_eq!(
+        path(&StatsQuery::PublicMatches {
+            less_than_match_id: Some(9_062_205_691)
+        }),
+        "/publicMatches?less_than_match_id=9062205691"
+    );
+    assert_eq!(
+        path(&StatsQuery::PublicMatches {
+            less_than_match_id: None
+        }),
+        "/publicMatches"
+    );
+}
