@@ -55,6 +55,14 @@ pub enum DiagnosticCode {
     StorageCorrupted,
     /// O orçamento de chamadas ao OpenDota do aplicativo acabou no período.
     OpendotaBudgetExhausted,
+    /// Não foi possível conectar ao OpenDota (rede ou DNS).
+    OpendotaUnreachable,
+    /// O OpenDota não respondeu a tempo.
+    OpendotaTimedOut,
+    /// O OpenDota recusou por excesso de chamadas (HTTP 429).
+    OpendotaRateLimited,
+    /// O OpenDota respondeu com status inesperado, corpo grande demais ou JSON inválido.
+    OpendotaBadResponse,
     /// Causa ainda não classificada; o diagnóstico traz os detalhes técnicos.
     Unclassified,
 }
@@ -84,6 +92,10 @@ impl DiagnosticCode {
         DiagnosticCode::StorageUnavailable,
         DiagnosticCode::StorageCorrupted,
         DiagnosticCode::OpendotaBudgetExhausted,
+        DiagnosticCode::OpendotaUnreachable,
+        DiagnosticCode::OpendotaTimedOut,
+        DiagnosticCode::OpendotaRateLimited,
+        DiagnosticCode::OpendotaBadResponse,
         DiagnosticCode::Unclassified,
     ];
 
@@ -114,6 +126,10 @@ impl DiagnosticCode {
             DiagnosticCode::StorageUnavailable => "STORAGE_UNAVAILABLE",
             DiagnosticCode::StorageCorrupted => "STORAGE_CORRUPTED",
             DiagnosticCode::OpendotaBudgetExhausted => "OPENDOTA_BUDGET_EXHAUSTED",
+            DiagnosticCode::OpendotaUnreachable => "OPENDOTA_UNREACHABLE",
+            DiagnosticCode::OpendotaTimedOut => "OPENDOTA_TIMED_OUT",
+            DiagnosticCode::OpendotaRateLimited => "OPENDOTA_RATE_LIMITED",
+            DiagnosticCode::OpendotaBadResponse => "OPENDOTA_BAD_RESPONSE",
             DiagnosticCode::Unclassified => "UNCLASSIFIED_ERROR",
         }
     }

@@ -6,6 +6,7 @@ pub mod domain;
 pub mod gsi;
 pub mod infrastructure;
 pub mod presentation;
+pub mod providers;
 pub mod storage;
 
 #[cfg(test)]

@@ -390,6 +390,75 @@ pub trait CallBudget: Send + Sync {
     fn reserve(&self, category: CallCategory, now: SystemTime) -> Result<(), BudgetError>;
 }
 
+/// Falha ao consultar o OpenDota. `path` é o caminho da consulta, sem o
+/// endereço do serviço.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ProviderError {
+    #[error("não foi possível conectar ao OpenDota ({path})")]
+    Unreachable {
+        path: String,
+        #[source]
+        source: SharedError,
+    },
+    #[error("o OpenDota não respondeu a tempo ({path})")]
+    TimedOut {
+        path: String,
+        #[source]
+        source: SharedError,
+    },
+    #[error("o OpenDota recusou por excesso de chamadas, HTTP 429 ({path})")]
+    RateLimited { path: String },
+    #[error("o OpenDota respondeu com HTTP {status} ({path})")]
+    UnexpectedStatus { path: String, status: u16 },
+    #[error("a resposta do OpenDota passou de {limit} bytes ({path})")]
+    BodyTooLarge { path: String, limit: usize },
+    #[error("a resposta do OpenDota não é um JSON válido ({path})")]
+    InvalidJson {
+        path: String,
+        #[source]
+        source: SharedError,
+    },
+    #[error(transparent)]
+    Budget(#[from] BudgetError),
+}
+
+impl ToDiagnostic for ProviderError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        let (code, cause, resolution) = match self {
+            ProviderError::Budget(budget_error) => return budget_error.to_diagnostic(redactor),
+            ProviderError::Unreachable { .. } => (
+                DiagnosticCode::OpendotaUnreachable,
+                "Não foi possível conectar ao OpenDota.",
+                "Verifique a conexão com a internet. Os dados guardados continuam aparecendo.",
+            ),
+            ProviderError::TimedOut { .. } => (
+                DiagnosticCode::OpendotaTimedOut,
+                "O OpenDota não respondeu a tempo.",
+                "Tente de novo mais tarde. Os dados guardados continuam aparecendo.",
+            ),
+            ProviderError::RateLimited { .. } => (
+                DiagnosticCode::OpendotaRateLimited,
+                "O OpenDota recusou a consulta por excesso de chamadas.",
+                "Espere alguns minutos; o aplicativo tenta de novo nas próximas consultas.",
+            ),
+            ProviderError::UnexpectedStatus { .. }
+            | ProviderError::BodyTooLarge { .. }
+            | ProviderError::InvalidJson { .. } => (
+                DiagnosticCode::OpendotaBadResponse,
+                "O OpenDota respondeu de um jeito inesperado.",
+                "Tente de novo mais tarde; se continuar, o formato da API pode ter mudado.",
+            ),
+        };
+        Diagnostic {
+            code,
+            title: UiText::new("Dados do OpenDota indisponíveis"),
+            cause: UiText::new(cause),
+            resolution: UiText::new(resolution),
+            technical_details: Some(technical_details(self, redactor)),
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/application/ports_tests.rs"]
 mod tests;

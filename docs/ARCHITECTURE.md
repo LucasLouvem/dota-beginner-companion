@@ -32,6 +32,7 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 | `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                                                                                          | `domain`, `application` |
 | `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis, itens, IDs de habilidades e patches                                           | `domain`, `application` |
 | `storage`        | Banco local SQLite com schema versionado e migrações atômicas (`storage::schema`): cache com prazo de validade e tabelas de orçamento de chamadas, builds de partidas públicas e cursor da coleta  | `domain`, `application` |
+| `providers`      | Dados externos: cliente HTTP de JSON (`providers::http_json`) com tempo limite, limite de tamanho, intervalo mínimo, nova tentativa no HTTP 429 e reserva no orçamento antes de cada tentativa     | `domain`, `application` |
 | `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                                                                                  | `domain`, `application` |
 | `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                                                                                               | todos                   |
 | `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                                                                                               | todos                   |
@@ -55,6 +56,8 @@ Regras:
 | `CallBudget`                | `storage::call_budget`          | Reserva cada chamada ao OpenDota no orçamento do aplicativo, por dia e por mês, de forma atômica |
 
 O orçamento de chamadas ao OpenDota é uma política conservadora do próprio aplicativo, não um limite oficial do OpenDota (`application::use_cases::call_budget`): por padrão, 1.000 chamadas por dia e 30.000 por mês, contadas em UTC. A coleta em segundo plano pode usar até 700 por dia e 21.000 por mês; as consultas das telas só param nos totais, então a coleta nunca ocupa as 300 chamadas diárias reservadas a elas. Cada reserva confere e incrementa os contadores numa transação `IMMEDIATE` do SQLite.
+
+Dados externos seguem o fallback de `application::use_cases::fallback`: cache ainda válido (sem chamar a API nem gastar orçamento), dado novo da API (gravado no cache só se for decodificado), cache vencido marcado como antigo, dados embutidos quando existem para a consulta e, sem nenhum deles, "sem dados" com a causa. As recomendações são identificadas por herói, modo e patch, com uma geração crescente (`application::use_cases::recommendation_request`): só a resposta da consulta atual é aceita.
 
 O `CacheStore` ainda não é usado pelo núcleo: os dados que ele vai guardar vêm dos providers da Fase 3. Os dados dos heróis (`infrastructure::hero_data`), dos itens com custo e receita (`infrastructure::item_data`), dos IDs das habilidades (`infrastructure::ability_id_data`) e dos patches (`infrastructure::patch_data`) são recortes do dotaconstants embutidos no binário, com fonte e licença em `assets/dotaconstants/SOURCE.md`. Um item grande tem receita e custo de pelo menos 2000 (`ItemCatalog::is_major_item`).
 
@@ -110,10 +113,10 @@ O GSI não informa o modo de jogo nem o momento em que a partida é aceita. Cada
 
 Decisões de arquitetura já aprovadas que ainda não existem no código. Quando uma delas é implementada, ela sai desta tabela e passa a ser descrita nas seções acima.
 
-| Camada          | Decisão                                                                                                                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`       | Configurações e histórico de partidas no SQLite (o cache já existe; ver acima)                                                                                                               |
-| `providers`     | A aplicação depende de uma interface de provider, não de uma API específica. Ordem de leitura: dado novo da API, depois cache vencido marcado como antigo, depois dados embutidos no binário |
-| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                                      |
-| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                                            |
-| Testes          | Testes ponta a ponta (E2E) em `tests/e2e_tests.rs`, exercitando o aplicativo completo pelas interfaces externas, conforme [TESTING.md](TESTING.md)                                           |
+| Camada          | Decisão                                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`       | Configurações e histórico de partidas no SQLite (o cache já existe; ver acima)                                                                                         |
+| `providers`     | A aplicação depende de uma interface de provider (port) com as consultas do OpenDota, ligada ao núcleo, que só publica a resposta da consulta atual (`RequestTracker`) |
+| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                |
+| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                      |
+| Testes          | Testes ponta a ponta (E2E) em `tests/e2e_tests.rs`, exercitando o aplicativo completo pelas interfaces externas, conforme [TESTING.md](TESTING.md)                     |
