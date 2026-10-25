@@ -3,9 +3,13 @@
 //! valores são escolhas conservadoras do aplicativo, não limites oficiais do
 //! OpenDota.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::application::ports::{BudgetExhausted, BudgetLimit, CallCategory};
+use crate::application::ports::{
+    BudgetError, BudgetExhausted, BudgetLimit, CallBudget, CallCategory,
+};
 
 /// Limites do orçamento.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +109,43 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     } as u32;
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     (year, month, day)
+}
+
+/// Orçamento de uma única consulta: até `limit` reservas, inclusive novas
+/// tentativas, cada uma também reservada no orçamento global.
+pub struct QueryBudget {
+    global: Arc<dyn CallBudget>,
+    limit: u32,
+    used: AtomicU32,
+}
+
+impl QueryBudget {
+    pub fn new(global: Arc<dyn CallBudget>, limit: u32) -> Self {
+        Self {
+            global,
+            limit,
+            used: AtomicU32::new(0),
+        }
+    }
+
+    /// Reservas concedidas até agora.
+    pub fn used(&self) -> u32 {
+        self.used.load(Ordering::SeqCst)
+    }
+}
+
+impl CallBudget for QueryBudget {
+    fn reserve(&self, category: CallCategory, now: SystemTime) -> Result<(), BudgetError> {
+        if self.used() >= self.limit {
+            return Err(BudgetError::Exhausted(BudgetExhausted {
+                category,
+                limit: BudgetLimit::PerQuery,
+            }));
+        }
+        self.global.reserve(category, now)?;
+        self.used.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

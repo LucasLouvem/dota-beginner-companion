@@ -131,3 +131,40 @@ fn leap_day_and_epoch_are_dated_correctly() {
     assert_eq!(budget_period(at(1_835_395_200)).day, "2028-02-29");
     assert_eq!(budget_period(UNIX_EPOCH).day, "1970-01-01");
 }
+
+/// Orçamento global que concede tudo e conta as reservas.
+#[derive(Default)]
+struct CountingGlobal {
+    granted: std::sync::atomic::AtomicU32,
+}
+
+impl CallBudget for CountingGlobal {
+    fn reserve(&self, _category: CallCategory, _now: SystemTime) -> Result<(), BudgetError> {
+        self.granted
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[test]
+fn query_budget_grants_up_to_its_limit_and_uses_the_global_budget() {
+    let global = Arc::new(CountingGlobal::default());
+    let query = QueryBudget::new(global.clone(), 2);
+
+    assert!(query.reserve(CallCategory::OnDemand, UNIX_EPOCH).is_ok());
+    assert!(query.reserve(CallCategory::OnDemand, UNIX_EPOCH).is_ok());
+    let refusal = query.reserve(CallCategory::OnDemand, UNIX_EPOCH);
+
+    assert!(
+        matches!(
+            refusal,
+            Err(BudgetError::Exhausted(BudgetExhausted {
+                limit: BudgetLimit::PerQuery,
+                ..
+            }))
+        ),
+        "{refusal:?}"
+    );
+    assert_eq!(query.used(), 2);
+    assert_eq!(global.granted.load(std::sync::atomic::Ordering::SeqCst), 2);
+}

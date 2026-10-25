@@ -236,6 +236,7 @@ A abertura do banco (`storage::schema`) e o adaptador `storage::sqlite_cache` cl
 | Situação                                                                                     | Código                       | Ação para o usuário                                                                       |
 | -------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
 | O limite do aplicativo para o dia ou o mês acabou (`BudgetExhausted`, com o limite atingido) | `OPENDOTA_BUDGET_EXHAUSTED`  | Esperar a renovação do limite (dia e mês em UTC); os dados guardados continuam aparecendo |
+| Uma consulta chegou ao limite de chamadas dela (`BudgetLimit::PerQuery`)                     | `OPENDOTA_BUDGET_EXHAUSTED`  | O resultado parcial aparece; a consulta seguinte usa o que ficou no cache                 |
 | Falha do banco local ao reservar                                                             | Os códigos de `StorageError` | Os mesmos do banco local                                                                  |
 
 ### OpenDota (`ProviderError`, `HttpJsonClientError`)

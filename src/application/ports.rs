@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
+use crate::domain::match_data::{HeroMatch, MatchDetails};
 use crate::domain::patch::PatchCatalog;
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
@@ -334,6 +335,9 @@ pub enum BudgetLimit {
     DailyCollection,
     MonthlyTotal,
     MonthlyCollection,
+    /// Limite de chamadas de uma única consulta (lista, detalhes e novas
+    /// tentativas).
+    PerQuery,
 }
 
 impl fmt::Display for BudgetLimit {
@@ -343,6 +347,7 @@ impl fmt::Display for BudgetLimit {
             BudgetLimit::DailyCollection => "da coleta no dia",
             BudgetLimit::MonthlyTotal => "total do mês",
             BudgetLimit::MonthlyCollection => "da coleta no mês",
+            BudgetLimit::PerQuery => "da consulta",
         })
     }
 }
@@ -468,6 +473,10 @@ impl ToDiagnostic for ProviderError {
 pub enum StatsQuery {
     /// Lista de patches do jogo.
     Patches,
+    /// Partidas recentes com o herói.
+    HeroMatches { hero_id: u32 },
+    /// Detalhes de uma partida.
+    MatchDetails { match_id: u64 },
 }
 
 impl StatsQuery {
@@ -475,6 +484,8 @@ impl StatsQuery {
     pub fn cache_key(&self) -> String {
         match self {
             StatsQuery::Patches => "stats/patches".into(),
+            StatsQuery::HeroMatches { hero_id } => format!("stats/heroes/{hero_id}/matches"),
+            StatsQuery::MatchDetails { match_id } => format!("stats/matches/{match_id}"),
         }
     }
 }
@@ -493,6 +504,12 @@ pub trait StatsProvider: Send + Sync {
 
     /// Patches a partir da resposta de `StatsQuery::Patches`.
     fn decode_patches(&self, raw: &str) -> Result<PatchCatalog, ProviderError>;
+
+    /// Partidas a partir da resposta de `StatsQuery::HeroMatches`.
+    fn decode_hero_matches(&self, raw: &str) -> Result<Vec<HeroMatch>, ProviderError>;
+
+    /// Detalhes a partir da resposta de `StatsQuery::MatchDetails`.
+    fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError>;
 }
 
 #[cfg(test)]
