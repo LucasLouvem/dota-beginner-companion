@@ -1,6 +1,7 @@
 //! Persistência local em SQLite. Implementa os ports de armazenamento de
 //! `application::ports`; o I/O é síncrono e deve rodar em `spawn_blocking`.
 
+pub mod schema;
 pub mod sqlite_cache;
 
 use std::path::PathBuf;

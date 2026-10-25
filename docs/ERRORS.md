@@ -221,13 +221,14 @@ Todas as falhas aparecem como "Teste de conexão falhou". O status HTTP é class
 
 ### Banco local (`StorageError`)
 
-O adaptador `storage::sqlite_cache` classifica a falha pelo código que o SQLite informa. Um valor do cache com o prazo vencido não é erro: ele volta marcado como antigo.
+A abertura do banco (`storage::schema`) e o adaptador `storage::sqlite_cache` classificam a falha pelo código que o SQLite informa. Cada migração do schema roda numa transação: se ela falha, o banco fica na versão anterior e a abertura devolve a falha. Um valor do cache com o prazo vencido não é erro: ele volta marcado como antigo.
 
 | Situação                                                                                  | Código                | Ação para o usuário                                   |
 | ----------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------- |
 | Sem permissão para abrir ou gravar o banco (`CannotOpen`, `PermissionDenied`, `ReadOnly`) | `STORAGE_UNAVAILABLE` | Verificar a permissão da pasta de dados do aplicativo |
 | Arquivo corrompido ou que não é SQLite (`DatabaseCorrupt`, `NotADatabase`)                | `STORAGE_CORRUPTED`   | Apagar o arquivo do banco; o aplicativo cria um novo  |
 | Banco criado por uma versão mais nova do aplicativo                                       | `UNCLASSIFIED_ERROR`  | Atualizar o aplicativo ou apagar o banco              |
+| Migração do schema que falha (o banco continua na versão anterior)                        | `UNCLASSIFIED_ERROR`  | Consultar os detalhes técnicos                        |
 | Outra falha do SQLite                                                                     | `UNCLASSIFIED_ERROR`  | Consultar os detalhes técnicos                        |
 
 ### Dados dos heróis (`HeroDataError`)
