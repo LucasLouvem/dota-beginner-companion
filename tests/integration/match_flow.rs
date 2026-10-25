@@ -3,7 +3,7 @@
 //! à mão a partir da leitura das fixtures.
 
 use dota_companion::domain::match_events::{
-    MatchEvent, MatchEventKind, MatchResult, MatchTracker, Provenance,
+    ItemPlacement, MatchEvent, MatchEventKind, MatchResult, MatchTracker, Provenance,
 };
 use dota_companion::gsi::normalize::game_snapshot;
 use serde_json::Value;
@@ -98,6 +98,7 @@ fn dragon_knight_match_in_progress_produces_level_item_and_death_events() {
                 leveled("dragon_knight_wyrms_wrath", 1),
                 inferred(MatchEventKind::ItemAdded {
                     item: "item_boots".into(),
+                    placement: ItemPlacement::Carried,
                 }),
             ],
             vec![
@@ -108,6 +109,7 @@ fn dragon_knight_match_in_progress_produces_level_item_and_death_events() {
             // fixture não inclui; aqui ele aparece pela primeira vez.
             vec![inferred(MatchEventKind::ItemAdded {
                 item: "item_point_booster".into(),
+                placement: ItemPlacement::Carried,
             })],
         ]
     );

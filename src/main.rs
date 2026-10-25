@@ -12,6 +12,7 @@ use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::domain::gsi_config::GsiEndpoint;
 use dota_companion::domain::hero_catalog::HeroCatalog;
+use dota_companion::domain::item_catalog::ItemCatalog;
 use dota_companion::infrastructure::{config, logging};
 use dota_companion::presentation::app::{App, CoreHandle};
 use dota_companion::presentation::widgets::diagnostic_text;
@@ -58,6 +59,18 @@ fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_default();
 
+    // Sem os dados embutidos o app segue: os itens aparecem com o nome interno
+    // e montagens não são reconhecidas.
+    let items = Arc::new(
+        infrastructure::item_data::embedded_catalog().unwrap_or_else(|data_error| {
+            log_error(
+                &data_error.to_diagnostic(&Redactor::default()),
+                "embedded item data is invalid; items keep their internal names",
+            );
+            ItemCatalog::default()
+        }),
+    );
+
     let dependencies = CoreDependencies {
         locator: Arc::new(infrastructure::steam_locator::SteamLocator::new(
             home,
@@ -74,6 +87,7 @@ fn main() -> anyhow::Result<()> {
                 log_path,
             )) as Arc<dyn application::ports::GsiRecorder>
         }),
+        items: Arc::clone(&items),
         endpoint: endpoint.clone(),
     };
 

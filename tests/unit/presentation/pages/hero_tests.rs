@@ -173,7 +173,8 @@ fn unknown_names_in_events_are_shown_as_received() {
     assert_eq!(
         event_label(
             &MatchEventKind::ItemAdded {
-                item: "item_tango".into()
+                item: "item_tango".into(),
+                placement: ItemPlacement::Carried,
             },
             &catalog()
         ),
@@ -210,4 +211,42 @@ fn static_data_labels_are_in_portuguese() {
     assert_eq!(attack_label(&AttackType::Melee), "Corpo a corpo");
     assert_eq!(role_label(&HeroRole::Support), "Suporte");
     assert_eq!(role_label(&HeroRole::Other("Jungler".into())), "Jungler");
+}
+
+#[test]
+fn neutral_item_events_say_neutral() {
+    assert_eq!(
+        event_label(
+            &MatchEventKind::ItemAdded {
+                item: "item_weighted_dice".into(),
+                placement: ItemPlacement::Neutral,
+            },
+            &catalog()
+        ),
+        "Item neutro equipado: item_weighted_dice"
+    );
+    assert_eq!(
+        event_label(
+            &MatchEventKind::ItemRemoved {
+                item: "item_weighted_dice".into(),
+                placement: ItemPlacement::Neutral,
+            },
+            &catalog()
+        ),
+        "Item neutro removido: item_weighted_dice"
+    );
+}
+
+#[test]
+fn assembled_item_event_lists_components_that_left() {
+    assert_eq!(
+        event_label(
+            &MatchEventKind::ItemAssembled {
+                item: "item_satanic".into(),
+                components: vec!["item_reaver".into(), "item_claymore".into()],
+            },
+            &catalog()
+        ),
+        "Item montado: item_satanic (item_reaver, item_claymore)"
+    );
 }

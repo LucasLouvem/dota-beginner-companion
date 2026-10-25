@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::{JoinError, JoinHandle};
 
 use crate::domain::gsi_config::GsiEndpoint;
+use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_events::MatchTracker;
 
 use super::diagnostics::DiagnosticReport;
@@ -37,6 +38,8 @@ pub struct CoreDependencies {
     pub tester: Arc<dyn ConnectionTester>,
     /// Presente quando a gravação de eventos em arquivo está ativa.
     pub recorder: Option<Arc<dyn GsiRecorder>>,
+    /// Receitas usadas para reconhecer itens montados na linha do tempo.
+    pub items: Arc<ItemCatalog>,
     pub endpoint: GsiEndpoint,
 }
 
@@ -54,7 +57,7 @@ pub async fn run(
         .recorder
         .clone()
         .map(|recorder| spawn_recorder(recorder, Arc::clone(&state)));
-    let mut match_tracker = MatchTracker::default();
+    let mut match_tracker = MatchTracker::new(Arc::clone(&dependencies.items));
     loop {
         tokio::select! {
             Some(event) = events.recv() => {

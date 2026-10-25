@@ -73,6 +73,7 @@ impl RunningCore {
             files: Arc::new(LocalConfigFiles) as Arc<dyn ConfigFiles>,
             tester: Arc::new(HttpConnectionTester::new().unwrap()) as Arc<dyn ConnectionTester>,
             recorder: None,
+            items: Arc::new(dota_companion::infrastructure::item_data::embedded_catalog().unwrap()),
             endpoint,
         };
         let (commands, command_receiver) = mpsc::unbounded_channel();

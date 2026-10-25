@@ -85,6 +85,7 @@ fn dependencies() -> CoreDependencies {
         files: Arc::new(MemoryFiles::default()),
         tester: Arc::new(PanickingTester),
         recorder: None,
+        items: Arc::default(),
         endpoint: GsiEndpoint {
             port: 53000,
             token: "token".into(),

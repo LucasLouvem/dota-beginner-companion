@@ -13,7 +13,7 @@ use crate::application::event_bus::{CoreConnectionError, UiCommand};
 use crate::application::state::{AppSnapshot, MatchStatus, TimelineEntry};
 use crate::domain::game::{GameSnapshot, HeroPick};
 use crate::domain::hero_catalog::{AttackType, HeroCatalog, HeroInfo, HeroRole, PrimaryAttribute};
-use crate::domain::match_events::{MatchEventKind, MatchResult, Provenance};
+use crate::domain::match_events::{ItemPlacement, MatchEventKind, MatchResult, Provenance};
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{
     Level, boxed_list, diagnostic_row, format_time, section_title, status_row,
@@ -369,9 +369,24 @@ pub fn event_label(kind: &MatchEventKind, catalog: &HeroCatalog) -> String {
             MatchResult::Defeat => translate("Partida terminou: derrota"),
             MatchResult::Unknown => translate("Partida terminou"),
         },
-        MatchEventKind::ItemAdded { item } => translate_with("Item no inventário: {}", &[item]),
-        MatchEventKind::ItemRemoved { item } => {
-            translate_with("Item saiu do inventário: {}", &[item])
+        MatchEventKind::ItemAdded {
+            item,
+            placement: ItemPlacement::Carried,
+        } => translate_with("Item no inventário: {}", &[item]),
+        MatchEventKind::ItemAdded {
+            item,
+            placement: ItemPlacement::Neutral,
+        } => translate_with("Item neutro equipado: {}", &[item]),
+        MatchEventKind::ItemRemoved {
+            item,
+            placement: ItemPlacement::Carried,
+        } => translate_with("Item saiu do inventário: {}", &[item]),
+        MatchEventKind::ItemRemoved {
+            item,
+            placement: ItemPlacement::Neutral,
+        } => translate_with("Item neutro removido: {}", &[item]),
+        MatchEventKind::ItemAssembled { item, components } => {
+            translate_with("Item montado: {} ({})", &[item, &components.join(", ")])
         }
         MatchEventKind::AbilityLeveled { ability, level } => {
             let name = catalog

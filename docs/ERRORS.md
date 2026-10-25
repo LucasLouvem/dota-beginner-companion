@@ -237,6 +237,13 @@ O adaptador `storage::sqlite_cache` classifica a falha pelo código que o SQLite
 | O recorte embutido do dotaconstants não pode ser lido | `UNCLASSIFIED_ERROR` | Erro no log; a aba Herói mostra só o que o GSI informa                          |
 | Herói que o recorte não tem                           | —                    | A aba mostra o nome interno enviado pelo GSI e avisa que não há dados embutidos |
 
+### Dados dos itens (`ItemDataError`)
+
+| Situação                                              | Código               | Comportamento                                                                               |
+| ----------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| O recorte embutido do dotaconstants não pode ser lido | `UNCLASSIFIED_ERROR` | Erro no log; os itens aparecem com o nome interno e montagens de itens não são reconhecidas |
+| Item que o recorte não tem                            | —                    | O item aparece com o nome interno enviado pelo GSI                                          |
+
 ### Reenvio do log GSI (`replay_gsi_log`)
 
 Ferramenta de desenvolvimento. Falhas ao ler a configuração usam os códigos da inicialização; falhas ao ler o arquivo do log ou ao iniciar o envio aparecem como `UNCLASSIFIED_ERROR`, com o título "Reenvio do log GSI falhou". O resumo final mostra só a contagem por resposta HTTP, nunca o conteúdo dos eventos.

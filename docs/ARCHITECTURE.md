@@ -67,7 +67,7 @@ Nos testes, os casos de uso recebem implementações falsas desses ports. Os tes
 
 O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo, e não passam pelo `MatchTracker`.
 
-O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fases), guarda o que já aconteceu na partida para não repetir eventos quando a fase volta e marca cada evento como confirmado pelo GSI, inferido ou manual. Uma partida nova começa na seleção de heróis vinda do menu ou do fim de outra partida; itens que entram ou saem do inventário são sempre inferidos.
+O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fases), guarda o que já aconteceu na partida para não repetir eventos quando a fase volta e marca cada evento como confirmado pelo GSI, inferido ou manual. Uma partida nova começa na seleção de heróis vinda do menu ou do fim de outra partida. Itens que entram ou saem são sempre inferidos: o espaço do TP é ignorado, itens do espaço neutro são marcados como neutros e, quando entra um item cuja receita (do catálogo de itens) inclui itens que saíram na mesma mudança, o evento é de item montado. No pós-jogo, o `MatchSummary` resume a partida a partir do último estado.
 
 ## Erros e diagnóstico
 
