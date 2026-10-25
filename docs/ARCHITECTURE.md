@@ -25,16 +25,16 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 
 ## Camadas
 
-| Módulo           | Responsabilidade                                                                                                                                                            | Pode depender de        |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, modo de jogo, eventos de partida e catálogos de heróis, itens, IDs de habilidades e patches | nada do projeto         |
-| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso                                                      | `domain`                |
-| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                                                                   | `domain`, `application` |
-| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis, itens, IDs de habilidades e patches                    | `domain`, `application` |
-| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                                                                            | `domain`, `application` |
-| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                                                           | `domain`, `application` |
-| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                                                                        | todos                   |
-| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                                                                        | todos                   |
+| Módulo           | Responsabilidade                                                                                                                                                                                   | Pode depender de        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, modo de jogo, eventos de partida e catálogos de heróis, itens, IDs de habilidades e patches, e agregação de builds | nada do projeto         |
+| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso                                                                             | `domain`                |
+| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                                                                                          | `domain`, `application` |
+| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis, itens, IDs de habilidades e patches                                           | `domain`, `application` |
+| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                                                                                                   | `domain`, `application` |
+| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                                                                                  | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                                                                                               | todos                   |
+| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                                                                                               | todos                   |
 
 Regras:
 
@@ -54,6 +54,8 @@ Regras:
 | `CacheStore`                | `storage::sqlite_cache`         | Grava e lê o cache local; valores vencidos voltam marcados como antigos |
 
 O `CacheStore` ainda não é usado pelo núcleo: os dados que ele vai guardar vêm dos providers da Fase 3. Os dados dos heróis (`infrastructure::hero_data`), dos itens com custo e receita (`infrastructure::item_data`), dos IDs das habilidades (`infrastructure::ability_id_data`) e dos patches (`infrastructure::patch_data`) são recortes do dotaconstants embutidos no binário, com fonte e licença em `assets/dotaconstants/SOURCE.md`. Um item grande tem receita e custo de pelo menos 2000 (`ItemCatalog::is_major_item`).
+
+`domain::builds` agrega partidas do OpenDota em builds, como aproximação a partir dos dados disponíveis. A build de uma partida são os três primeiros itens grandes: com `purchase_log` não vazio, pelo primeiro registro de compra de cada item, em ordem (`OrderedPurchaseLog`); sem ele, pelos três primeiros do inventário final, sem ordem (`FinalInventoryUnordered`). Builds de evidências diferentes nunca são agrupadas juntas. O ranking mantém as builds com pelo menos 10 partidas, ordenadas pela taxa de vitória observada e, no empate, pela amostra maior. A ordem de habilidades mais comum compara as dez primeiras evoluções, com a mesma amostra mínima.
 
 Nos testes, os casos de uso recebem implementações falsas desses ports. Os testes unitários ficam em `tests/unit/` e os de integração em `tests/integration/`, conforme [TESTING.md](TESTING.md).
 
