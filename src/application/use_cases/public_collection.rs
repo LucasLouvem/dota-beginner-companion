@@ -7,15 +7,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::application::ports::{
-    CacheStore, CallBudget, CallCategory, ProviderError, PublicBuild, PublicBuildStore,
-    StatsProvider, StatsQuery, StorageError, StorageFailureKind,
+    CallCategory, ProviderError, PublicBuild, StatsQuery, StorageError, StorageFailureKind,
 };
 use crate::domain::builds::build_from_match;
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::{MatchDetails, PublicMatchSummary, collected_mode};
-use crate::domain::patch::PatchCatalog;
 
 use super::current_patch::load_current_patch;
+use super::external_sources::ExternalSources;
 
 /// Espera depois que o orçamento da coleta acabou; a reserva recusada não
 /// usa a rede, então tentar de novo é barato.
@@ -24,18 +23,6 @@ pub const BUDGET_WAIT: Duration = Duration::from_secs(15 * 60);
 pub const FAILURE_WAIT: Duration = Duration::from_secs(5 * 60);
 /// Pausa entre ciclos normais.
 pub const CYCLE_PAUSE: Duration = Duration::from_secs(5);
-
-/// Dependências da coleta.
-pub struct CollectionSources {
-    pub provider: Arc<dyn StatsProvider>,
-    /// Orçamento global; a coleta reserva na categoria `Collection`.
-    pub budget: Arc<dyn CallBudget>,
-    pub store: Arc<dyn PublicBuildStore>,
-    /// Cache usado para o patch atual.
-    pub cache: Arc<dyn CacheStore>,
-    pub items: Arc<ItemCatalog>,
-    pub embedded_patches: Option<PatchCatalog>,
-}
 
 /// Como terminou um ciclo.
 #[derive(Debug, Clone)]
@@ -98,7 +85,7 @@ pub fn public_builds(
 }
 
 /// Um ciclo da coleta para o patch `patch_id`.
-pub async fn collect_once(sources: &CollectionSources, patch_id: u32) -> CycleOutcome {
+pub async fn collect_once(sources: &ExternalSources, patch_id: u32) -> CycleOutcome {
     let store = Arc::clone(&sources.store);
     let cursor = match blocking(move || store.cursor()).await {
         Ok(cursor) => cursor,
@@ -163,7 +150,7 @@ pub async fn collect_once(sources: &CollectionSources, patch_id: u32) -> CycleOu
 /// Coleta enquanto o aplicativo estiver aberto: confere o patch atual,
 /// apaga builds de outros patches quando ele muda e roda os ciclos, com
 /// esperas depois de orçamento esgotado ou falha. Termina só com o runtime.
-pub async fn run_collection(sources: CollectionSources) {
+pub async fn run_collection(sources: ExternalSources) {
     let mut purged_for: Option<u32> = None;
     loop {
         let patch = load_current_patch(
@@ -203,7 +190,7 @@ pub async fn run_collection(sources: CollectionSources) {
     }
 }
 
-async fn fetch(sources: &CollectionSources, query: &StatsQuery) -> Result<String, ProviderError> {
+async fn fetch(sources: &ExternalSources, query: &StatsQuery) -> Result<String, ProviderError> {
     sources
         .provider
         .fetch(query, CallCategory::Collection, sources.budget.as_ref())

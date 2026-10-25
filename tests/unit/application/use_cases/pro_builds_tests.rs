@@ -2,11 +2,15 @@
 //! fonte de estatísticas em memória.
 
 use super::*;
-use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit};
+use crate::application::ports::{
+    BudgetError, BudgetExhausted, BudgetLimit, CacheStore, CallBudget,
+};
 use crate::domain::builds::{BuildEvidence, BuildKey, Purchase};
 use crate::domain::item_catalog::ItemInfo;
 use crate::domain::match_data::MatchPlayer;
-use crate::test_support::{FakeResponse, FakeStatsProvider, MemoryCache, UnlimitedBudget};
+use crate::test_support::{
+    FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
+};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
 
@@ -109,11 +113,13 @@ impl Setup {
     }
 
     async fn run_with(&self, budget: Arc<dyn CallBudget>, limits: ProBuildLimits) -> ProBuilds {
-        let sources = ProBuildsSources {
+        let sources = ExternalSources {
             provider: self.provider.clone(),
             budget,
             cache: self.cache.clone(),
+            store: Arc::new(MemoryPublicBuildStore::default()),
             items: items(),
+            embedded_patches: None,
         };
         load_pro_builds(&sources, ZEUS, PATCH, at(10_000), limits).await
     }

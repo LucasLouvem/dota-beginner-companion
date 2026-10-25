@@ -2,6 +2,7 @@
 
 pub mod call_budget;
 pub mod current_patch;
+pub mod external_sources;
 pub mod fallback;
 pub mod install_gsi_config;
 pub mod pro_builds;

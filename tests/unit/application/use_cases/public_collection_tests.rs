@@ -2,68 +2,16 @@
 //! a fonte de estatísticas e o armazenamento em memória.
 
 use super::*;
-use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit};
-use crate::domain::builds::{BuildEvidence, MatchBuild, Purchase};
+use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit, CallBudget};
+use crate::domain::builds::{BuildEvidence, Purchase};
 use crate::domain::item_catalog::ItemInfo;
 use crate::domain::match_data::MatchPlayer;
-use crate::test_support::{FakeResponse, FakeStatsProvider, MemoryCache, UnlimitedBudget};
-use std::sync::Mutex;
+use crate::test_support::{
+    FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
+};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 const PATCH: u32 = 60;
-
-/// Armazenamento em memória: guarda as builds e o histórico do cursor.
-#[derive(Default)]
-struct MemoryStore {
-    builds: Mutex<Vec<PublicBuild>>,
-    cursor: Mutex<Option<u64>>,
-}
-
-impl MemoryStore {
-    fn starting_at(cursor: u64) -> Arc<Self> {
-        let store = Self::default();
-        *store.cursor.lock().unwrap() = Some(cursor);
-        Arc::new(store)
-    }
-
-    fn saved(&self) -> Vec<PublicBuild> {
-        self.builds.lock().unwrap().clone()
-    }
-
-    fn current_cursor(&self) -> Option<u64> {
-        *self.cursor.lock().unwrap()
-    }
-}
-
-impl PublicBuildStore for MemoryStore {
-    fn save_match(&self, builds: &[PublicBuild], cursor: u64) -> Result<(), StorageError> {
-        self.builds.lock().unwrap().extend_from_slice(builds);
-        *self.cursor.lock().unwrap() = Some(cursor);
-        Ok(())
-    }
-
-    fn cursor(&self) -> Result<Option<u64>, StorageError> {
-        Ok(self.current_cursor())
-    }
-
-    fn reset_cursor(&self) -> Result<(), StorageError> {
-        *self.cursor.lock().unwrap() = None;
-        Ok(())
-    }
-
-    fn builds(
-        &self,
-        _hero_id: u32,
-        _game_modes: &[u32],
-        _patch_id: u32,
-    ) -> Result<Vec<(MatchBuild, bool)>, StorageError> {
-        Ok(Vec::new())
-    }
-
-    fn purge_other_patches(&self, _patch_id: u32) -> Result<usize, StorageError> {
-        Ok(0)
-    }
-}
 
 /// Orçamento que concede `on_demand` sempre e só as primeiras
 /// `collection_limit` reservas da coleta.
@@ -155,10 +103,10 @@ fn respond_details(provider: &FakeStatsProvider, match_details: MatchDetails) {
 
 fn sources(
     provider: Arc<FakeStatsProvider>,
-    store: Arc<MemoryStore>,
+    store: Arc<MemoryPublicBuildStore>,
     budget: Arc<dyn CallBudget>,
-) -> CollectionSources {
-    CollectionSources {
+) -> ExternalSources {
+    ExternalSources {
         provider,
         budget,
         store,
@@ -206,7 +154,7 @@ fn sample_provider() -> Arc<FakeStatsProvider> {
 #[tokio::test]
 async fn collects_builds_only_from_all_pick_and_turbo_between_players() {
     let provider = sample_provider();
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryPublicBuildStore::default());
 
     let outcome = collect_once(
         &sources(provider.clone(), store.clone(), Arc::new(UnlimitedBudget)),
@@ -247,7 +195,7 @@ async fn listing_starts_from_the_saved_cursor() {
         FakeResponse::PublicMatches(vec![summary(450, 23, 0)]),
     );
     respond_details(&provider, details(450, vec![player(22, Some(PATCH))]));
-    let store = MemoryStore::starting_at(500);
+    let store = Arc::new(MemoryPublicBuildStore::starting_at(500));
 
     let outcome = collect_once(
         &sources(Arc::new(provider), store.clone(), Arc::new(UnlimitedBudget)),
@@ -271,7 +219,7 @@ async fn listing_starts_from_the_saved_cursor() {
 
 #[tokio::test]
 async fn failed_listing_keeps_the_cursor() {
-    let store = MemoryStore::starting_at(500);
+    let store = Arc::new(MemoryPublicBuildStore::starting_at(500));
 
     let outcome = collect_once(
         &sources(
@@ -295,7 +243,7 @@ async fn failed_listing_keeps_the_cursor() {
 
 #[tokio::test]
 async fn exhausted_collection_budget_mid_cycle_keeps_the_last_saved_match() {
-    let store = Arc::new(MemoryStore::default());
+    let store = Arc::new(MemoryPublicBuildStore::default());
     let budget = Arc::new(CollectionBudget {
         collection_limit: 2,
         granted: AtomicU32::new(0),
@@ -322,7 +270,7 @@ async fn without_collection_budget_nothing_is_fetched_and_screens_still_reserve(
     let outcome = collect_once(
         &sources(
             provider.clone(),
-            Arc::new(MemoryStore::default()),
+            Arc::new(MemoryPublicBuildStore::default()),
             budget.clone(),
         ),
         PATCH,
@@ -345,7 +293,7 @@ async fn without_collection_budget_nothing_is_fetched_and_screens_still_reserve(
 async fn empty_listing_restarts_from_the_newest_matches() {
     let provider = FakeStatsProvider::default();
     provider.respond(&listing(Some(10)), FakeResponse::PublicMatches(vec![]));
-    let store = MemoryStore::starting_at(10);
+    let store = Arc::new(MemoryPublicBuildStore::starting_at(10));
 
     let outcome = collect_once(
         &sources(Arc::new(provider), store.clone(), Arc::new(UnlimitedBudget)),

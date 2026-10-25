@@ -7,9 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::application::ports::{
-    CacheStore, CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
-};
+use crate::application::ports::{CallCategory, ProviderError, StatsProvider, StatsQuery};
 use crate::domain::builds::{
     AbilityOrder, BuildRanking, MIN_SAMPLE, MatchBuild, ability_order, build_from_match,
     rank_builds,
@@ -18,6 +16,7 @@ use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::{HeroMatch, MatchDetails};
 
 use super::call_budget::QueryBudget;
+use super::external_sources::ExternalSources;
 use super::fallback::{DataOrigin, Sourced, load_with_fallback};
 
 /// Validade da lista de partidas do herói no cache.
@@ -93,17 +92,9 @@ pub struct ProBuilds {
     pub calls: u32,
 }
 
-/// Dependências da consulta.
-pub struct ProBuildsSources {
-    pub provider: Arc<dyn StatsProvider>,
-    pub budget: Arc<dyn CallBudget>,
-    pub cache: Arc<dyn CacheStore>,
-    pub items: Arc<ItemCatalog>,
-}
-
 /// Consulta as builds profissionais de `hero_id` no patch `patch_id`.
 pub async fn load_pro_builds(
-    sources: &ProBuildsSources,
+    sources: &ExternalSources,
     hero_id: u32,
     patch_id: u32,
     now: SystemTime,
@@ -248,7 +239,7 @@ fn discard(result: &mut ProBuilds, reason: DiscardReason) {
 /// Lê uma consulta com fallback (sem dados embutidos), reservando no
 /// orçamento da consulta.
 async fn fetch<T>(
-    sources: &ProBuildsSources,
+    sources: &ExternalSources,
     budget: &Arc<QueryBudget>,
     query: StatsQuery,
     ttl: Duration,

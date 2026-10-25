@@ -12,9 +12,8 @@ use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_
 use dota_companion::application::ports::{CacheStore, CallBudget, PublicBuildStore, StatsProvider};
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::application::use_cases::call_budget::BudgetLimits;
-use dota_companion::application::use_cases::public_collection::{
-    CollectionSources, run_collection,
-};
+use dota_companion::application::use_cases::external_sources::ExternalSources;
+use dota_companion::application::use_cases::public_collection::run_collection;
 use dota_companion::domain::gsi_config::GsiEndpoint;
 use dota_companion::domain::hero_catalog::HeroCatalog;
 use dota_companion::domain::item_catalog::ItemCatalog;
@@ -132,7 +131,7 @@ fn main() -> anyhow::Result<()> {
     ));
     // Sem o banco local ou o cliente HTTP o app segue, sem coletar partidas
     // públicas.
-    if let Some(sources) = collection_sources(&storage::database_path(), &items) {
+    if let Some(sources) = external_sources(&storage::database_path(), &items) {
         runtime.spawn(run_collection(sources));
     }
 
@@ -158,9 +157,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Dependências da coleta de partidas públicas, ou `None` (com o erro no
-/// log) quando o banco local ou o cliente HTTP não puderam ser abertos.
-fn collection_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<CollectionSources> {
+/// Fontes de dados externos (OpenDota, orçamento, cache e builds públicas),
+/// ou `None` (com o erro no log) quando o banco local ou o cliente HTTP não
+/// puderam ser abertos.
+fn external_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<ExternalSources> {
     let failed = |diagnostic_source: &dyn ToDiagnostic| {
         log_error(
             &diagnostic_source.to_diagnostic(&Redactor::default()),
@@ -187,7 +187,7 @@ fn collection_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<Colle
             );
         })
         .ok();
-    Some(CollectionSources {
+    Some(ExternalSources {
         provider: Arc::new(OpenDotaProvider::new(http, Arc::clone(items)))
             as Arc<dyn StatsProvider>,
         budget: Arc::new(budget) as Arc<dyn CallBudget>,
