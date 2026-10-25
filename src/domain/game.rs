@@ -124,6 +124,14 @@ pub struct AbilityState {
     pub ultimate: bool,
 }
 
+impl AbilityState {
+    /// Habilidade cosmética do Dota Plus (`plus_*`, como `plus_high_five`),
+    /// que o GSI envia junto com as do herói em partidas com matchmaking.
+    pub fn is_cosmetic(&self) -> bool {
+        self.name.starts_with("plus_")
+    }
+}
+
 /// Item em um espaço do inventário (`slot0..8`, `stash0..5`, `teleport0`,
 /// `neutral0..1`). Espaços vazios não entram na lista.
 #[derive(Debug, Clone, PartialEq, Eq)]

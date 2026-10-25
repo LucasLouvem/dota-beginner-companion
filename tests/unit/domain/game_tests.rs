@@ -92,3 +92,15 @@ fn offers_all_pick_turbo_and_bots_once_each() {
 fn default_game_mode_is_all_pick() {
     assert_eq!(GameMode::default(), GameMode::AllPick);
 }
+
+#[test]
+fn dota_plus_abilities_are_cosmetic_and_hero_abilities_are_not() {
+    let ability = |name: &str| AbilityState {
+        name: name.into(),
+        level: 1,
+        ultimate: false,
+    };
+    assert!(ability("plus_high_five").is_cosmetic());
+    assert!(!ability("medusa_split_shot").is_cosmetic());
+    assert!(!ability("zuus_unknown").is_cosmetic());
+}

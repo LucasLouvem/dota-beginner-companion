@@ -212,6 +212,7 @@ fn push_hero_picked(events: &mut Vec<MatchEvent>, previous: &GameSnapshot, curre
 }
 
 /// Só compara quando os dois estados trazem as habilidades do mesmo herói.
+/// Habilidades cosméticas não geram evento.
 fn push_ability_levels(
     events: &mut Vec<MatchEvent>,
     previous: &GameSnapshot,
@@ -225,7 +226,10 @@ fn push_ability_levels(
     if previous.hero != current.hero {
         return;
     }
-    for ability in current_abilities {
+    for ability in current_abilities
+        .iter()
+        .filter(|ability| !ability.is_cosmetic())
+    {
         let leveled = previous_abilities
             .iter()
             .find(|previous_ability| previous_ability.name == ability.name)

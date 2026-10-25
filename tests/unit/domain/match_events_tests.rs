@@ -553,3 +553,47 @@ fn second_match_starting_with_wait_for_players_reports_start_and_end_again() {
         2
     );
 }
+
+fn medusa_with(abilities: &[(&str, u32)]) -> GameSnapshot {
+    GameSnapshot {
+        hero: HeroPick::Picked {
+            name: "npc_dota_hero_medusa".into(),
+            id: None,
+        },
+        abilities: Some(
+            abilities
+                .iter()
+                .map(|(name, level)| AbilityState {
+                    name: (*name).into(),
+                    level: *level,
+                    ultimate: false,
+                })
+                .collect(),
+        ),
+        ..in_phase(GamePhase::InProgress)
+    }
+}
+
+#[test]
+fn cosmetic_ability_leveling_produces_no_event() {
+    let events = observe_all(vec![
+        medusa_with(&[("medusa_split_shot", 1), ("plus_high_five", 0)]),
+        medusa_with(&[("medusa_split_shot", 1), ("plus_high_five", 1)]),
+    ]);
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
+fn hero_ability_leveling_next_to_a_cosmetic_one_is_still_reported() {
+    let events = observe_all(vec![
+        medusa_with(&[("medusa_split_shot", 1), ("plus_high_five", 0)]),
+        medusa_with(&[("medusa_split_shot", 2), ("plus_high_five", 1)]),
+    ]);
+    assert_eq!(
+        kinds(&events),
+        vec![MatchEventKind::AbilityLeveled {
+            ability: "medusa_split_shot".into(),
+            level: 2,
+        }]
+    );
+}

@@ -792,3 +792,32 @@ fn mode_row_without_informed_mode_says_so() {
         "Modo de jogo aguardando confirmação"
     );
 }
+
+#[test]
+fn cosmetic_abilities_are_hidden_and_unknown_hero_abilities_stay() {
+    let game = GameSnapshot {
+        abilities: Some(vec![
+            AbilityState {
+                name: "zuus_arc_lightning".into(),
+                level: 2,
+                ultimate: false,
+            },
+            AbilityState {
+                name: "plus_high_five".into(),
+                level: 1,
+                ultimate: false,
+            },
+            AbilityState {
+                name: "zuus_unknown".into(),
+                level: 0,
+                ultimate: false,
+            },
+        ]),
+        ..picked("npc_dota_hero_zuus", Some(22))
+    };
+
+    let (_, lines) = ability_lines(Some(&game), Some(&zeus_info())).unwrap();
+
+    let names: Vec<&str> = lines.iter().map(|line| line.name.as_str()).collect();
+    assert_eq!(names, ["Arc Lightning", "zuus_unknown"]);
+}

@@ -885,8 +885,8 @@ fn ability_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<Row
         .collect()
 }
 
-/// Habilidades a exibir: as do GSI, com nome de exibição quando o catálogo
-/// o conhece; sem elas, a lista dos dados embutidos.
+/// Habilidades a exibir: as do GSI, sem as cosméticas, com nome de exibição
+/// quando o catálogo o conhece; sem elas, a lista dos dados embutidos.
 pub fn ability_lines(
     game: Option<&GameSnapshot>,
     hero: Option<&HeroInfo>,
@@ -894,6 +894,7 @@ pub fn ability_lines(
     if let Some(abilities) = game.and_then(|game| game.abilities.as_ref()) {
         let lines = abilities
             .iter()
+            .filter(|ability| !ability.is_cosmetic())
             .map(|ability| AbilityLine {
                 name: hero
                     .and_then(|hero| hero.ability_display_name(&ability.name))
