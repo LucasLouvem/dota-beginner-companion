@@ -162,3 +162,36 @@ fn request_failure_details_do_not_expose_the_token() {
         Some("não foi possível enviar o evento de teste: falha ao enviar auth.token=[removido]")
     );
 }
+
+#[test]
+fn exhausted_budget_has_its_own_code_and_names_the_limit() {
+    let budget_error = BudgetError::Exhausted(BudgetExhausted {
+        category: CallCategory::Collection,
+        limit: BudgetLimit::DailyCollection,
+    });
+
+    let diagnostic = budget_error.to_diagnostic(&Redactor::default());
+
+    assert_eq!(diagnostic.code, DiagnosticCode::OpendotaBudgetExhausted);
+    assert_eq!(
+        diagnostic.title,
+        UiText::new("Limite de consultas ao OpenDota atingido")
+    );
+    assert_eq!(
+        diagnostic.technical_details.as_deref(),
+        Some("o limite da coleta no dia de chamadas ao OpenDota foi atingido")
+    );
+}
+
+#[test]
+fn budget_storage_failure_keeps_the_storage_diagnostic() {
+    let storage_error = StorageError::Operation {
+        operation: "reservar uma chamada",
+        kind: StorageFailureKind::Corrupted,
+        source: Arc::new(io::Error::other("arquivo danificado")),
+    };
+
+    let diagnostic = BudgetError::Storage(storage_error).to_diagnostic(&Redactor::default());
+
+    assert_eq!(diagnostic.code, DiagnosticCode::StorageCorrupted);
+}

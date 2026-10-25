@@ -231,6 +231,13 @@ A abertura do banco (`storage::schema`) e o adaptador `storage::sqlite_cache` cl
 | Migração do schema que falha (o banco continua na versão anterior)                        | `UNCLASSIFIED_ERROR`  | Consultar os detalhes técnicos                        |
 | Outra falha do SQLite                                                                     | `UNCLASSIFIED_ERROR`  | Consultar os detalhes técnicos                        |
 
+### Orçamento de chamadas ao OpenDota (`BudgetError`)
+
+| Situação                                                                                     | Código                       | Ação para o usuário                                                                       |
+| -------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| O limite do aplicativo para o dia ou o mês acabou (`BudgetExhausted`, com o limite atingido) | `OPENDOTA_BUDGET_EXHAUSTED`  | Esperar a renovação do limite (dia e mês em UTC); os dados guardados continuam aparecendo |
+| Falha do banco local ao reservar                                                             | Os códigos de `StorageError` | Os mesmos do banco local                                                                  |
+
 ### Dados dos heróis (`HeroDataError`)
 
 | Situação                                              | Código               | Comportamento                                                                   |

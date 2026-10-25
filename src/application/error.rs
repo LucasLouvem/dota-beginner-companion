@@ -53,6 +53,8 @@ pub enum DiagnosticCode {
     StorageUnavailable,
     /// O banco local está corrompido ou não é um banco SQLite.
     StorageCorrupted,
+    /// O orçamento de chamadas ao OpenDota do aplicativo acabou no período.
+    OpendotaBudgetExhausted,
     /// Causa ainda não classificada; o diagnóstico traz os detalhes técnicos.
     Unclassified,
 }
@@ -81,6 +83,7 @@ impl DiagnosticCode {
         DiagnosticCode::TranslationsUnavailable,
         DiagnosticCode::StorageUnavailable,
         DiagnosticCode::StorageCorrupted,
+        DiagnosticCode::OpendotaBudgetExhausted,
         DiagnosticCode::Unclassified,
     ];
 
@@ -110,6 +113,7 @@ impl DiagnosticCode {
             DiagnosticCode::TranslationsUnavailable => "TRANSLATIONS_UNAVAILABLE",
             DiagnosticCode::StorageUnavailable => "STORAGE_UNAVAILABLE",
             DiagnosticCode::StorageCorrupted => "STORAGE_CORRUPTED",
+            DiagnosticCode::OpendotaBudgetExhausted => "OPENDOTA_BUDGET_EXHAUSTED",
             DiagnosticCode::Unclassified => "UNCLASSIFIED_ERROR",
         }
     }

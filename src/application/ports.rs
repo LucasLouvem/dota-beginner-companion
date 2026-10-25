@@ -1,6 +1,7 @@
 //! Interfaces que os adaptadores (infraestrutura, GSI e storage) implementam.
 
 use std::error::Error;
+use std::fmt;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -303,6 +304,90 @@ pub trait ConnectionTester: Send + Sync {
         &'a self,
         endpoint: &'a GsiEndpoint,
     ) -> BoxFuture<'a, Result<(), ConnectionTestError>>;
+}
+
+/// Para que serve uma chamada ao OpenDota. Cada categoria tem seus limites no
+/// orçamento do aplicativo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallCategory {
+    /// Consulta pedida por uma tela; tem prioridade.
+    OnDemand,
+    /// Coleta de partidas públicas em segundo plano.
+    Collection,
+}
+
+impl CallCategory {
+    /// Nome gravado no banco local.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            CallCategory::OnDemand => "on_demand",
+            CallCategory::Collection => "collection",
+        }
+    }
+}
+
+/// Limite do orçamento que foi atingido.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetLimit {
+    DailyTotal,
+    DailyCollection,
+    MonthlyTotal,
+    MonthlyCollection,
+}
+
+impl fmt::Display for BudgetLimit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            BudgetLimit::DailyTotal => "total do dia",
+            BudgetLimit::DailyCollection => "da coleta no dia",
+            BudgetLimit::MonthlyTotal => "total do mês",
+            BudgetLimit::MonthlyCollection => "da coleta no mês",
+        })
+    }
+}
+
+/// O orçamento de chamadas do aplicativo acabou para a categoria.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("o limite {limit} de chamadas ao OpenDota foi atingido")]
+pub struct BudgetExhausted {
+    pub category: CallCategory,
+    pub limit: BudgetLimit,
+}
+
+/// Falha ao reservar uma chamada ao OpenDota.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum BudgetError {
+    #[error(transparent)]
+    Exhausted(#[from] BudgetExhausted),
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+}
+
+impl ToDiagnostic for BudgetError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        match self {
+            BudgetError::Exhausted(_) => Diagnostic {
+                code: DiagnosticCode::OpendotaBudgetExhausted,
+                title: UiText::new("Limite de consultas ao OpenDota atingido"),
+                cause: UiText::new(
+                    "O aplicativo limita as próprias chamadas ao OpenDota para não sobrecarregar o serviço.",
+                ),
+                resolution: UiText::new(
+                    "Os dados guardados continuam aparecendo. Novas consultas voltam quando o limite renovar (o dia e o mês contam em UTC).",
+                ),
+                technical_details: Some(technical_details(self, redactor)),
+            },
+            BudgetError::Storage(storage_error) => storage_error.to_diagnostic(redactor),
+        }
+    }
+}
+
+/// Orçamento de chamadas ao OpenDota, persistido. Cada chamada (inclusive
+/// novas tentativas e respostas 429) reserva uma unidade antes de sair.
+pub trait CallBudget: Send + Sync {
+    /// Reserva uma chamada da categoria no período de `now`, ou informa qual
+    /// limite acabou. Conferir e reservar é uma única operação.
+    fn reserve(&self, category: CallCategory, now: SystemTime) -> Result<(), BudgetError>;
 }
 
 #[cfg(test)]
