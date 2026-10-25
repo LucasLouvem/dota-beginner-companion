@@ -25,16 +25,16 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 
 ## Camadas
 
-| Módulo           | Responsabilidade                                                                                                                 | Pode depender de        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, eventos de partida e catálogos de heróis e itens | nada do projeto         |
-| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso           | `domain`                |
-| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                        | `domain`, `application` |
-| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis e itens      | `domain`, `application` |
-| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                                 | `domain`, `application` |
-| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                | `domain`, `application` |
-| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                             | todos                   |
-| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                             | todos                   |
+| Módulo           | Responsabilidade                                                                                                                               | Pode depender de        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, modo de jogo, eventos de partida e catálogos de heróis e itens | nada do projeto         |
+| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso                         | `domain`                |
+| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                                      | `domain`, `application` |
+| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis e itens                    | `domain`, `application` |
+| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                                               | `domain`, `application` |
+| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                              | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                                           | todos                   |
+| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                                           | todos                   |
 
 Regras:
 
@@ -63,11 +63,13 @@ Nos testes, os casos de uso recebem implementações falsas desses ports. Os tes
 2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha. Um evento aceito do Dota leva também o estado de jogo normalizado (`gsi::normalize`); cada campo é lido isoladamente, e um bloco vazio (`{}`) significa "sem dado".
 3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual, a linha do tempo da partida e o resumo da última partida terminada, que fica disponível até a próxima partida ser encontrada.
 4. A interface lê o `AppSnapshot` mais recente e atualiza nas telas só as linhas que mudaram. Na aba Herói, eventos novos entram no topo da linha do tempo e os mais antigos saem de baixo, sem recriar as demais linhas.
-5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI ou marcar "Partida encontrada". O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
+5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI, marcar "Partida encontrada" ou informar o modo de jogo. O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
 
 O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo, e não passam pelo `MatchTracker`.
 
 O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fases), guarda o que já aconteceu na partida para não repetir eventos quando a fase volta e marca cada evento como confirmado pelo GSI, inferido ou manual. Uma partida nova começa na primeira fase antes do jogo (espera dos jogadores ou seleção de heróis) vinda do menu ou do fim de outra partida. Itens que entram ou saem são sempre inferidos: o espaço do TP é ignorado, itens do espaço neutro são marcados como neutros e, quando entra um item cuja receita (do catálogo de itens) inclui itens que saíram na mesma mudança, o evento é de item montado. No pós-jogo, o `MatchSummary` resume a partida a partir do último estado.
+
+O GSI não informa o modo de jogo nem o momento em que a partida é aceita. Cada "Partida encontrada", automática ou manual, recebe um número (`match_number`) e abre a pergunta do modo, com o último modo confirmado na execução pré-selecionado (Escolha Livre na primeira partida). A interface abre a pergunta uma vez por número. Só o botão "Confirmar" grava o modo como informado pelo usuário; fechar a pergunta grava o modo pré-selecionado como modo padrão. O comando de escolha leva o número da partida, e o núcleo ignora a resposta de uma partida anterior. O modo fica só em memória e acompanha a última partida enquanto ela é mostrada.
 
 ## Erros e diagnóstico
 

@@ -3,8 +3,8 @@
 use super::*;
 use crate::application::error::{DiagnosticCode, Redactor};
 use crate::application::ports::{BoxFuture, ConnectionTestError, GsiRecordError, LocatorResult};
-use crate::application::state::GsiLogStatus;
-use crate::domain::game::{GamePhase, GameSnapshot};
+use crate::application::state::{GsiLogStatus, ModeOrigin, ModeState};
+use crate::domain::game::{GameMode, GamePhase, GameSnapshot};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, Provenance};
 use crate::test_support::{CapturedLogs, MemoryFiles, capture_logs};
 use std::io;
@@ -676,4 +676,74 @@ async fn install_round_clears_interruption_of_an_older_round() {
     let snapshot = wait_for(&mut core.state, |snapshot| snapshot.install_attempt == 1).await;
     assert!(snapshot.diagnostics_interrupted.is_none());
     assert_eq!(shown_round(&snapshot), round_path(2));
+}
+
+#[tokio::test]
+async fn chosen_game_mode_is_published_for_the_found_match() {
+    let mut core = start(dependencies(), AppSnapshot::default());
+    core.commands.send(UiCommand::MarkMatchFound).unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        snapshot.match_status.match_number == 1
+    })
+    .await;
+
+    core.commands
+        .send(UiCommand::ChooseGameMode {
+            match_number: 1,
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen,
+        })
+        .unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        matches!(snapshot.match_status.mode, ModeState::Confirmed { .. })
+    })
+    .await;
+    assert_eq!(
+        snapshot.match_status.mode,
+        ModeState::Confirmed {
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen
+        }
+    );
+    assert_eq!(
+        snapshot.match_status.last_confirmed_mode,
+        Some(GameMode::Turbo)
+    );
+}
+
+#[tokio::test]
+async fn restarted_core_asks_with_all_pick_again() {
+    let mut first_run = start(dependencies(), AppSnapshot::default());
+    first_run.commands.send(UiCommand::MarkMatchFound).unwrap();
+    wait_for(&mut first_run.state, |snapshot| {
+        snapshot.match_status.match_number == 1
+    })
+    .await;
+    first_run
+        .commands
+        .send(UiCommand::ChooseGameMode {
+            match_number: 1,
+            mode: GameMode::Bots,
+            origin: ModeOrigin::Chosen,
+        })
+        .unwrap();
+    wait_for(&mut first_run.state, |snapshot| {
+        snapshot.match_status.last_confirmed_mode == Some(GameMode::Bots)
+    })
+    .await;
+
+    let mut second_run = start(dependencies(), AppSnapshot::default());
+    second_run.commands.send(UiCommand::MarkMatchFound).unwrap();
+
+    let snapshot = wait_for(&mut second_run.state, |snapshot| {
+        snapshot.match_status.match_number == 1
+    })
+    .await;
+    assert_eq!(
+        snapshot.match_status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
 }

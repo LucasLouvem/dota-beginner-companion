@@ -3,8 +3,8 @@
 
 use std::time::SystemTime;
 
-use crate::application::state::{MatchStatus, TimelineEntry};
-use crate::domain::game::{GamePhase, GameSnapshot};
+use crate::application::state::{MatchStatus, ModeOrigin, ModeState, TimelineEntry};
+use crate::domain::game::{GameMode, GamePhase, GameSnapshot};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, MatchSummary};
 
 /// Quantidade máxima de eventos guardados na linha do tempo; os mais antigos
@@ -38,10 +38,33 @@ pub fn record_manual_match_found(status: &mut MatchStatus, at: SystemTime) {
     push_event(status, MatchEvent::manual_match_found(), at);
 }
 
+/// Grava o modo informado para a partida `match_number`, que passa a ser o
+/// pré-selecionado na próxima. Uma resposta de partida anterior (de uma
+/// pergunta aberta quando outra partida foi encontrada) é ignorada. Só os
+/// campos de modo mudam: a linha do tempo e a partida continuam as mesmas.
+pub fn record_mode_choice(
+    status: &mut MatchStatus,
+    match_number: u64,
+    mode: GameMode,
+    origin: ModeOrigin,
+) {
+    if match_number != status.match_number || status.match_number == 0 {
+        return;
+    }
+    status.mode = ModeState::Confirmed { mode, origin };
+    status.last_confirmed_mode = Some(mode);
+}
+
+/// Uma partida encontrada começa uma linha do tempo nova e abre a pergunta do
+/// modo, com o último modo confirmado (ou Escolha Livre) pré-selecionado.
 fn push_event(status: &mut MatchStatus, event: MatchEvent, at: SystemTime) {
     if event.kind == MatchEventKind::MatchFound {
         status.timeline.clear();
         status.last_match = None;
+        status.match_number += 1;
+        status.mode = ModeState::Awaiting {
+            preselected: status.last_confirmed_mode.unwrap_or_default(),
+        };
     }
     status.timeline.push(TimelineEntry { at, event });
     let excess = status.timeline.len().saturating_sub(TIMELINE_LIMIT);

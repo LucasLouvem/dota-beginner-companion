@@ -1,7 +1,8 @@
 //! Testes unitários de `src/application/use_cases/track_match.rs`.
 
 use super::*;
-use crate::domain::game::{GamePhase, HeroPick, MatchId, Team};
+use crate::application::state::{ModeOrigin, ModeState};
+use crate::domain::game::{GameMode, GamePhase, HeroPick, MatchId, Team};
 use crate::domain::match_events::MatchResult;
 use crate::domain::match_events::Provenance;
 use std::time::{Duration, UNIX_EPOCH};
@@ -92,6 +93,7 @@ fn manual_match_found_is_recorded_as_manual_and_keeps_game() {
             event: event(MatchEventKind::HeroDied),
         }],
         last_match: None,
+        ..MatchStatus::default()
     };
 
     record_manual_match_found(&mut status, at(5));
@@ -286,4 +288,221 @@ fn menu_after_post_game_keeps_the_summary_unchanged() {
     let summary = status.last_match.clone();
     record_match_update(&mut status, GameSnapshot::menu(), vec![], at(20));
     assert_eq!(status.last_match, summary);
+}
+
+fn match_found() -> MatchEvent {
+    MatchEvent {
+        kind: MatchEventKind::MatchFound,
+        provenance: Provenance::Inferred,
+    }
+}
+
+/// Encontra uma partida pelo GSI, como a entrada na seleção de heróis.
+fn find_match(status: &mut MatchStatus, seconds: u64) {
+    record_match_update(
+        status,
+        game(GamePhase::HeroSelection),
+        vec![match_found()],
+        at(seconds),
+    );
+}
+
+#[test]
+fn first_match_of_the_session_asks_with_all_pick_preselected() {
+    let mut status = MatchStatus::default();
+
+    find_match(&mut status, 10);
+
+    assert_eq!(status.match_number, 1);
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
+}
+
+#[test]
+fn next_match_asks_with_the_last_confirmed_mode_preselected() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+    record_mode_choice(&mut status, 1, GameMode::Turbo, ModeOrigin::Chosen);
+
+    find_match(&mut status, 20);
+
+    assert_eq!(status.match_number, 2);
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::Turbo
+        }
+    );
+}
+
+#[test]
+fn confirmed_choice_sets_match_mode_and_next_default() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+
+    record_mode_choice(&mut status, 1, GameMode::Bots, ModeOrigin::Chosen);
+
+    assert_eq!(
+        status.mode,
+        ModeState::Confirmed {
+            mode: GameMode::Bots,
+            origin: ModeOrigin::Chosen
+        }
+    );
+    assert_eq!(status.last_confirmed_mode, Some(GameMode::Bots));
+}
+
+#[test]
+fn closing_without_confirming_records_default_origin_and_leaves_nothing_pending() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+
+    record_mode_choice(&mut status, 1, GameMode::AllPick, ModeOrigin::Default);
+
+    assert_eq!(
+        status.mode,
+        ModeState::Confirmed {
+            mode: GameMode::AllPick,
+            origin: ModeOrigin::Default
+        }
+    );
+    assert!(!matches!(status.mode, ModeState::Awaiting { .. }));
+}
+
+#[test]
+fn changing_mode_later_keeps_timeline_match_and_last_match() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+    record_mode_choice(&mut status, 1, GameMode::AllPick, ModeOrigin::Default);
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(20),
+    );
+    let timeline = status.timeline.clone();
+    let last_match = status.last_match.clone();
+
+    record_mode_choice(&mut status, 1, GameMode::Turbo, ModeOrigin::Chosen);
+
+    assert_eq!(status.timeline, timeline);
+    assert_eq!(status.last_match, last_match);
+    assert_eq!(status.match_number, 1);
+    assert_eq!(
+        status.mode,
+        ModeState::Confirmed {
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen
+        }
+    );
+}
+
+#[test]
+fn answer_for_an_earlier_match_is_ignored() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+    find_match(&mut status, 20);
+
+    record_mode_choice(&mut status, 1, GameMode::Turbo, ModeOrigin::Default);
+
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
+    assert_eq!(status.last_confirmed_mode, None);
+}
+
+#[test]
+fn choice_before_any_match_is_ignored() {
+    let mut status = MatchStatus::default();
+
+    record_mode_choice(&mut status, 0, GameMode::Turbo, ModeOrigin::Chosen);
+
+    assert_eq!(status.mode, ModeState::NotAsked);
+    assert_eq!(status.last_confirmed_mode, None);
+}
+
+#[test]
+fn confirmed_mode_stays_with_the_last_match_after_returning_to_menu() {
+    let mut status = MatchStatus::default();
+    find_match(&mut status, 10);
+    record_mode_choice(&mut status, 1, GameMode::Turbo, ModeOrigin::Chosen);
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(20),
+    );
+
+    record_match_update(&mut status, GameSnapshot::menu(), vec![], at(30));
+
+    assert!(status.last_match.is_some());
+    assert_eq!(
+        status.mode,
+        ModeState::Confirmed {
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen
+        }
+    );
+}
+
+#[test]
+fn new_session_state_forgets_the_last_confirmed_mode() {
+    let mut previous_session = MatchStatus::default();
+    find_match(&mut previous_session, 10);
+    record_mode_choice(
+        &mut previous_session,
+        1,
+        GameMode::Turbo,
+        ModeOrigin::Chosen,
+    );
+
+    let mut new_session = MatchStatus::default();
+    find_match(&mut new_session, 20);
+
+    assert_eq!(
+        new_session.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
+}
+
+#[test]
+fn match_without_id_does_not_preselect_bots() {
+    let mut status = MatchStatus::default();
+    let without_id = GameSnapshot {
+        match_id: None,
+        ..game(GamePhase::HeroSelection)
+    };
+
+    record_match_update(&mut status, without_id, vec![match_found()], at(10));
+
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
+}
+
+#[test]
+fn manual_match_found_also_asks_for_the_mode() {
+    let mut status = MatchStatus::default();
+
+    record_manual_match_found(&mut status, at(10));
+
+    assert_eq!(status.match_number, 1);
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
 }

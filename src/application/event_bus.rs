@@ -6,9 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::domain::game::GameSnapshot;
+use crate::domain::game::{GameMode, GameSnapshot};
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
+use super::state::ModeOrigin;
 
 /// Eventos produzidos pelos adaptadores de entrada (servidor GSI).
 #[derive(Debug, Clone)]
@@ -113,6 +114,12 @@ pub enum UiCommand {
     },
     /// O usuário marcou "Partida encontrada", sem depender do GSI.
     MarkMatchFound,
+    /// O usuário informou o modo da partida `match_number`.
+    ChooseGameMode {
+        match_number: u64,
+        mode: GameMode,
+        origin: ModeOrigin,
+    },
 }
 
 impl UiCommand {
@@ -123,6 +130,7 @@ impl UiCommand {
             UiCommand::TestConnection => "testar a conexão",
             UiCommand::InstallGsiConfig { .. } => "instalar a configuração GSI",
             UiCommand::MarkMatchFound => "marcar a partida encontrada",
+            UiCommand::ChooseGameMode { .. } => "informar o modo de jogo",
         }
     }
 }
@@ -157,6 +165,7 @@ impl ToDiagnostic for CoreConnectionError {
                 UiCommand::MarkMatchFound => {
                     "O pedido para marcar a partida encontrada não foi recebido."
                 }
+                UiCommand::ChooseGameMode { .. } => "O modo de jogo informado não foi recebido.",
             },
             CoreConnectionError::EventRejected => {
                 "Um evento do servidor GSI não pôde ser entregue ao núcleo."

@@ -23,7 +23,9 @@ use super::use_cases::install_gsi_config::install_gsi_config;
 use super::use_cases::record_gsi_event::record_gsi_event;
 use super::use_cases::record_gsi_payload::{apply_record_result, payload_to_record};
 use super::use_cases::run_diagnostics::run_diagnostics;
-use super::use_cases::track_match::{record_manual_match_found, record_match_update};
+use super::use_cases::track_match::{
+    record_manual_match_found, record_match_update, record_mode_choice,
+};
 
 const DIAGNOSTICS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -132,6 +134,13 @@ fn handle_command(
         UiCommand::RunDiagnostics => spawn_diagnostics(dependencies, state, rounds),
         UiCommand::MarkMatchFound => state.send_modify(|snapshot| {
             record_manual_match_found(&mut snapshot.match_status, SystemTime::now());
+        }),
+        UiCommand::ChooseGameMode {
+            match_number,
+            mode,
+            origin,
+        } => state.send_modify(|snapshot| {
+            record_mode_choice(&mut snapshot.match_status, match_number, mode, origin);
         }),
         UiCommand::TestConnection => {
             state.send_modify(|snapshot| snapshot.connection_test = Some(ConnectionTest::Running));

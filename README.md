@@ -8,6 +8,7 @@ Feito para Arch Linux com KDE Plasma (Wayland), em Rust com GTK4 + Relm4.
 
 A aba **Herói** acompanha a partida pelo GSI:
 
+- quando a partida é encontrada, pergunta numa janela do próprio aplicativo o modo de jogo (Escolha Livre, Turbo ou Contra bots), que o GSI não informa; a escolha vem marcada com o último modo confirmado e pode ser alterada depois;
 - mostra o herói escolhido com atributo, tipo de ataque e funções, a partir de dados embutidos do [dotaconstants](https://github.com/odota/dotaconstants) (sem rede), que também fornecem os nomes e as receitas dos itens;
 - mostra as estatísticas da partida (abates, mortes, assistências, last hits, denies, GPM, XPM, nível e ouro) e os itens carregados, com nomes de exibição;
 - lista as habilidades com o nível atual informado pelo GSI;

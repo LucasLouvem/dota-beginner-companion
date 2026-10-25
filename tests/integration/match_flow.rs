@@ -2,6 +2,9 @@
 //! normalizador e pelo acompanhamento da partida. A lista esperada foi escrita
 //! à mão a partir da leitura das fixtures.
 
+use dota_companion::application::state::{MatchStatus, ModeState};
+use dota_companion::application::use_cases::track_match::record_match_update;
+use dota_companion::domain::game::GameMode;
 use dota_companion::domain::match_events::{
     ItemPlacement, MatchEvent, MatchEventKind, MatchResult, MatchTracker, Provenance,
 };
@@ -157,4 +160,26 @@ fn real_match_end_reports_satanic_assembly_and_victory() {
     );
     assert_eq!(events[3], vec![]);
     assert_eq!(events[4], vec![]);
+}
+
+#[test]
+fn real_bot_match_asks_for_the_mode_once_with_all_pick_preselected() {
+    let mut tracker = MatchTracker::default();
+    let mut status = MatchStatus::default();
+
+    for payload in fixture("zeus_bot_match.jsonl") {
+        let game = game_snapshot(&payload);
+        let events = tracker.observe(game.clone());
+        record_match_update(&mut status, game, events, std::time::SystemTime::UNIX_EPOCH);
+    }
+
+    // A fixture tem uma única entrada na seleção de heróis, vinda do menu, e
+    // `matchid "0"`; o ID ausente não sugere "Contra bots".
+    assert_eq!(status.match_number, 1);
+    assert_eq!(
+        status.mode,
+        ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        }
+    );
 }

@@ -79,3 +79,16 @@ fn empty_or_non_numeric_match_id_is_no_id() {
     assert_eq!(MatchId::from_gsi("12a4"), None);
     assert_eq!(MatchId::from_gsi(" 123"), None);
 }
+
+#[test]
+fn offers_all_pick_turbo_and_bots_once_each() {
+    assert_eq!(
+        GameMode::ALL,
+        [GameMode::AllPick, GameMode::Turbo, GameMode::Bots]
+    );
+}
+
+#[test]
+fn default_game_mode_is_all_pick() {
+    assert_eq!(GameMode::default(), GameMode::AllPick);
+}

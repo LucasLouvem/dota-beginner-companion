@@ -69,6 +69,22 @@ impl Team {
     }
 }
 
+/// Modo da partida. O GSI não informa o modo; ele vem da escolha do usuário.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GameMode {
+    /// Escolha Livre.
+    #[default]
+    AllPick,
+    Turbo,
+    /// Contra bots.
+    Bots,
+}
+
+impl GameMode {
+    /// Todos os modos, na ordem em que são oferecidos ao usuário.
+    pub const ALL: [GameMode; 3] = [GameMode::AllPick, GameMode::Turbo, GameMode::Bots];
+}
+
 /// ID da partida no Dota (`map.matchid`). Contra bots o GSI envia `"0"`
 /// durante a partida; o ID real só chega no pós-jogo.
 #[derive(Debug, Clone, PartialEq, Eq)]

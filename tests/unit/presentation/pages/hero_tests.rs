@@ -2,7 +2,7 @@
 //! sem widgets).
 
 use super::*;
-use crate::domain::game::{AbilityState, GamePhase};
+use crate::domain::game::{AbilityState, GameMode, GamePhase};
 use crate::domain::game::{CarriedItem, MatchId};
 use crate::domain::hero_catalog::AbilityInfo;
 use crate::domain::item_catalog::ItemInfo;
@@ -326,6 +326,7 @@ fn shows_current_match_when_it_has_a_picked_hero() {
         game: Some(picked("npc_dota_hero_zuus", Some(22))),
         timeline: vec![],
         last_match: Some(summary()),
+        ..MatchStatus::default()
     };
     assert!(matches!(hero_view(&status), HeroView::Current(Some(_))));
 }
@@ -336,6 +337,7 @@ fn shows_last_match_when_current_state_has_no_hero() {
         game: Some(GameSnapshot::menu()),
         timeline: vec![],
         last_match: Some(summary()),
+        ..MatchStatus::default()
     };
     assert_eq!(hero_view(&status), HeroView::LastMatch(&summary()));
 }
@@ -457,6 +459,7 @@ fn in_progress_with_gold(gold: u32) -> MatchStatus {
         }),
         timeline: vec![],
         last_match: None,
+        ..MatchStatus::default()
     }
 }
 
@@ -616,6 +619,7 @@ fn last_match_content_has_result_rows_before_the_hero() {
         game: Some(GameSnapshot::menu()),
         timeline: vec![],
         last_match: Some(summary()),
+        ..MatchStatus::default()
     };
     let content = content_of(&status);
 
@@ -651,5 +655,140 @@ fn empty_state_shows_the_placeholder_rows() {
             "Sem itens para mostrar",
             "O Dota envia os itens a partir do pré-jogo.",
         )]
+    );
+}
+
+fn awaiting(match_number: u64, preselected: GameMode) -> MatchStatus {
+    MatchStatus {
+        match_number,
+        mode: ModeState::Awaiting { preselected },
+        ..MatchStatus::default()
+    }
+}
+
+fn confirmed(mode: GameMode, origin: ModeOrigin) -> MatchStatus {
+    MatchStatus {
+        match_number: 1,
+        mode: ModeState::Confirmed { mode, origin },
+        ..MatchStatus::default()
+    }
+}
+
+#[test]
+fn mode_labels_are_in_portuguese_without_repetition() {
+    let labels: Vec<String> = GameMode::ALL.into_iter().map(mode_label).collect();
+    assert_eq!(labels, ["Escolha Livre", "Turbo", "Contra bots"]);
+    assert_eq!(mode_origin_label(ModeOrigin::Chosen), "Informado por você");
+    assert_eq!(mode_origin_label(ModeOrigin::Default), "Modo padrão");
+}
+
+#[test]
+fn found_match_opens_the_mode_question_once() {
+    let status = awaiting(1, GameMode::Turbo);
+
+    assert_eq!(mode_dialog_request(&status, 0), Some((1, GameMode::Turbo)));
+    assert_eq!(mode_dialog_request(&status, 1), None);
+}
+
+#[test]
+fn mode_question_does_not_open_without_a_waiting_match() {
+    assert_eq!(mode_dialog_request(&MatchStatus::default(), 0), None);
+    assert_eq!(
+        mode_dialog_request(&confirmed(GameMode::Turbo, ModeOrigin::Chosen), 0),
+        None
+    );
+}
+
+#[test]
+fn confirm_button_records_the_selected_mode_as_chosen() {
+    assert_eq!(
+        mode_dialog_outcome(
+            ModeDialogKind::MatchFound,
+            true,
+            GameMode::AllPick,
+            GameMode::Turbo
+        ),
+        Some((GameMode::Turbo, ModeOrigin::Chosen))
+    );
+    assert_eq!(
+        mode_dialog_outcome(
+            ModeDialogKind::Change,
+            true,
+            GameMode::Turbo,
+            GameMode::Bots
+        ),
+        Some((GameMode::Bots, ModeOrigin::Chosen))
+    );
+}
+
+#[test]
+fn closing_the_match_question_keeps_the_preselected_mode_as_default() {
+    assert_eq!(
+        mode_dialog_outcome(
+            ModeDialogKind::MatchFound,
+            false,
+            GameMode::AllPick,
+            GameMode::Turbo
+        ),
+        Some((GameMode::AllPick, ModeOrigin::Default))
+    );
+}
+
+#[test]
+fn closing_the_change_question_changes_nothing() {
+    assert_eq!(
+        mode_dialog_outcome(
+            ModeDialogKind::Change,
+            false,
+            GameMode::Turbo,
+            GameMode::Bots
+        ),
+        None
+    );
+}
+
+#[test]
+fn mode_can_be_changed_only_after_it_was_informed() {
+    assert_eq!(change_mode_preselection(&MatchStatus::default()), None);
+    assert_eq!(
+        change_mode_preselection(&awaiting(1, GameMode::AllPick)),
+        None
+    );
+    assert_eq!(
+        change_mode_preselection(&confirmed(GameMode::Bots, ModeOrigin::Default)),
+        Some(GameMode::Bots)
+    );
+}
+
+#[test]
+fn mode_row_shows_mode_and_origin() {
+    assert_eq!(
+        mode_row(&ModeState::Confirmed {
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen
+        }),
+        RowContent::new(Level::Info, "Modo de jogo: Turbo", "Informado por você")
+    );
+    assert_eq!(
+        mode_row(&ModeState::Confirmed {
+            mode: GameMode::AllPick,
+            origin: ModeOrigin::Default
+        }),
+        RowContent::new(Level::Info, "Modo de jogo: Escolha Livre", "Modo padrão")
+    );
+}
+
+#[test]
+fn mode_row_without_informed_mode_says_so() {
+    assert_eq!(
+        mode_row(&ModeState::NotAsked).title,
+        "Modo de jogo ainda não informado"
+    );
+    assert_eq!(
+        mode_row(&ModeState::Awaiting {
+            preselected: GameMode::AllPick
+        })
+        .title,
+        "Modo de jogo aguardando confirmação"
     );
 }

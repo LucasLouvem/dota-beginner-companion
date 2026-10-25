@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::domain::game::GameSnapshot;
+use crate::domain::game::{GameMode, GameSnapshot};
 use crate::domain::match_events::{MatchEvent, MatchSummary};
 
 use super::diagnostics::DiagnosticReport;
@@ -168,7 +168,33 @@ pub struct TimelineEntry {
     pub event: MatchEvent,
 }
 
+/// Como o modo da partida foi informado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeOrigin {
+    /// O usuário confirmou o modo no botão "Confirmar".
+    Chosen,
+    /// O usuário fechou a pergunta sem confirmar; vale o modo pré-selecionado.
+    Default,
+}
+
+/// Modo da partida encontrada.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ModeState {
+    /// Nenhuma partida foi encontrada desde que o aplicativo abriu.
+    #[default]
+    NotAsked,
+    /// A partida foi encontrada e a pergunta do modo está aberta.
+    Awaiting {
+        preselected: GameMode,
+    },
+    Confirmed {
+        mode: GameMode,
+        origin: ModeOrigin,
+    },
+}
+
 /// Estado de jogo mais recente e a linha do tempo da partida acompanhada.
+/// Fica só em memória: ao reiniciar o aplicativo, tudo volta ao padrão.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchStatus {
     /// Último estado normalizado de um evento do Dota.
@@ -178,6 +204,14 @@ pub struct MatchStatus {
     /// Resumo da última partida terminada. Fica disponível até a próxima
     /// partida ser encontrada.
     pub last_match: Option<MatchSummary>,
+    /// Quantas partidas foram encontradas desde que o aplicativo abriu. Cada
+    /// uma tem um único número, para a pergunta do modo abrir uma vez só e
+    /// para descartar respostas de uma partida anterior.
+    pub match_number: u64,
+    /// Modo da partida atual, ou da última enquanto ela é mostrada.
+    pub mode: ModeState,
+    /// Último modo confirmado; é o pré-selecionado na próxima partida.
+    pub last_confirmed_mode: Option<GameMode>,
 }
 
 /// Estado completo exibido pela interface.

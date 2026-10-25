@@ -2,8 +2,11 @@
 //! os itens e as habilidades que o GSI informa e a linha do tempo da partida.
 //! Sem herói na partida atual, mostra a última partida terminada. Cada
 //! informação diz de onde vem: dado embutido, confirmado pelo GSI, inferido ou
-//! marcado pelo usuário.
+//! marcado pelo usuário. Quando uma partida é encontrada, pergunta o modo de
+//! jogo numa janela sobre o aplicativo.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use relm4::adw::prelude::*;
@@ -12,8 +15,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::application::error::{Diagnostic, Redactor, ToDiagnostic, log_error};
 use crate::application::event_bus::{CoreConnectionError, UiCommand};
-use crate::application::state::{AppSnapshot, MatchStatus, TimelineEntry};
-use crate::domain::game::{CarriedItem, GamePhase, GameSnapshot, HeroPick, PlayerStats};
+use crate::application::state::{AppSnapshot, MatchStatus, ModeOrigin, ModeState, TimelineEntry};
+use crate::domain::game::{CarriedItem, GameMode, GamePhase, GameSnapshot, HeroPick, PlayerStats};
 use crate::domain::hero_catalog::{AttackType, HeroCatalog, HeroInfo, HeroRole, PrimaryAttribute};
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_events::{
@@ -55,6 +58,7 @@ pub enum HeroView<'a> {
 /// Conteúdo das seções da aba, exceto a linha do tempo, na ordem exibida.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroContent {
+    pub mode: Vec<RowContent>,
     /// Título da seção do herói: "Herói escolhido" ou "Última partida".
     pub title: String,
     pub hero: Vec<RowContent>,
@@ -77,6 +81,15 @@ impl TimelineChange<'_> {
     }
 }
 
+/// Por que a pergunta do modo foi aberta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeDialogKind {
+    /// Uma partida foi encontrada; fechar sem confirmar vale o pré-selecionado.
+    MatchFound,
+    /// O usuário quer alterar o modo já informado; fechar não muda nada.
+    Change,
+}
+
 /// Página Herói.
 pub struct HeroPage {
     commands: UnboundedSender<UiCommand>,
@@ -86,6 +99,11 @@ pub struct HeroPage {
     redactor: Redactor,
     /// Falha de comunicação com o núcleo, mostrada na própria página.
     core_failure: Option<CoreConnectionError>,
+    /// Última partida cuja pergunta do modo já foi aberta.
+    handled_match: u64,
+    /// Pergunta do modo aberta para uma partida encontrada, com o número dela.
+    /// É fechada se outra partida for encontrada antes da resposta.
+    open_mode_dialog: Option<(u64, adw::AlertDialog)>,
 }
 
 /// Mensagens recebidas pela página Herói.
@@ -94,6 +112,14 @@ pub enum HeroMessage {
     Snapshot(Box<AppSnapshot>),
     CoreStopped,
     MarkMatchFound,
+    /// Botão "Alterar modo de jogo".
+    ChangeMode,
+    /// Resposta da pergunta do modo para a partida `match_number`.
+    ChooseMode {
+        match_number: u64,
+        mode: GameMode,
+        origin: ModeOrigin,
+    },
 }
 
 /// Dados para iniciar a página.
@@ -105,6 +131,8 @@ pub struct HeroPageInit {
 
 /// Widgets da página, com o que cada lista mostra agora.
 pub struct HeroWidgets {
+    mode: RowSection,
+    change_mode_button: gtk::Button,
     hero_title: gtk::Label,
     hero: RowSection,
     stats: RowSection,
@@ -236,6 +264,19 @@ impl Component for HeroPage {
         }
         content.append(&match_found_button);
 
+        let mode_list = boxed_list();
+        content.append(&section_title(&translate("Modo de jogo")));
+        content.append(&mode_list);
+        let change_mode_button = gtk::Button::with_label(&translate("Alterar modo de jogo"));
+        change_mode_button.set_halign(gtk::Align::Start);
+        change_mode_button.set_sensitive(false);
+        {
+            let button_sender = sender.clone();
+            change_mode_button
+                .connect_clicked(move |_| button_sender.input(HeroMessage::ChangeMode));
+        }
+        content.append(&change_mode_button);
+
         let hero_title = section_title("");
         let hero_list = boxed_list();
         content.append(&hero_title);
@@ -270,8 +311,12 @@ impl Component for HeroPage {
             match_status: MatchStatus::default(),
             redactor: Redactor::default(),
             core_failure: None,
+            handled_match: 0,
+            open_mode_dialog: None,
         };
         let mut widgets = HeroWidgets {
+            mode: RowSection::new(mode_list),
+            change_mode_button,
             hero_title,
             hero: RowSection::new(hero_list),
             stats: RowSection::new(stats_list),
@@ -287,19 +332,62 @@ impl Component for HeroPage {
         &mut self,
         widgets: &mut Self::Widgets,
         message: Self::Input,
-        _sender: ComponentSender<Self>,
-        _root: &Self::Root,
+        sender: ComponentSender<Self>,
+        root: &Self::Root,
     ) {
         match message {
             HeroMessage::Snapshot(snapshot) => {
                 self.match_status = snapshot.match_status;
                 self.redactor = snapshot.redactor;
+                if let Some((match_number, preselected)) =
+                    mode_dialog_request(&self.match_status, self.handled_match)
+                {
+                    self.handled_match = match_number;
+                    // A pergunta de uma partida anterior não vale mais; a
+                    // resposta dela, se vier, é descartada pelo núcleo.
+                    if let Some((_, stale_dialog)) = self.open_mode_dialog.take() {
+                        stale_dialog.force_close();
+                    }
+                    let dialog = present_mode_dialog(
+                        root,
+                        ModeDialogKind::MatchFound,
+                        match_number,
+                        preselected,
+                        sender,
+                    );
+                    self.open_mode_dialog = Some((match_number, dialog));
+                }
             }
             HeroMessage::CoreStopped => self.report_core_failure(CoreConnectionError::StateClosed),
-            HeroMessage::MarkMatchFound => {
-                if let Err(core_error) = send_command(&self.commands, UiCommand::MarkMatchFound) {
-                    self.report_core_failure(core_error);
+            HeroMessage::MarkMatchFound => self.send(UiCommand::MarkMatchFound),
+            HeroMessage::ChangeMode => {
+                if let Some(current) = change_mode_preselection(&self.match_status) {
+                    present_mode_dialog(
+                        root,
+                        ModeDialogKind::Change,
+                        self.match_status.match_number,
+                        current,
+                        sender,
+                    );
                 }
+            }
+            HeroMessage::ChooseMode {
+                match_number,
+                mode,
+                origin,
+            } => {
+                if self
+                    .open_mode_dialog
+                    .as_ref()
+                    .is_some_and(|(open_match, _)| *open_match == match_number)
+                {
+                    self.open_mode_dialog = None;
+                }
+                self.send(UiCommand::ChooseGameMode {
+                    match_number,
+                    mode,
+                    origin,
+                });
             }
         }
         self.render(widgets);
@@ -307,6 +395,12 @@ impl Component for HeroPage {
 }
 
 impl HeroPage {
+    fn send(&mut self, command: UiCommand) {
+        if let Err(core_error) = send_command(&self.commands, command) {
+            self.report_core_failure(core_error);
+        }
+    }
+
     /// Guarda a primeira falha de comunicação com o núcleo.
     fn report_core_failure(&mut self, core_error: CoreConnectionError) {
         if self.core_failure.is_none() {
@@ -330,6 +424,11 @@ impl HeroPage {
             &self.catalog,
             &self.items,
         );
+        widgets.mode.show(content.mode);
+        let can_change_mode = change_mode_preselection(&self.match_status).is_some();
+        if widgets.change_mode_button.is_sensitive() != can_change_mode {
+            widgets.change_mode_button.set_sensitive(can_change_mode);
+        }
         if widgets.hero_title.label().as_str() != content.title {
             widgets.hero_title.set_label(&content.title);
         }
@@ -416,6 +515,7 @@ pub fn hero_content(
     };
 
     HeroContent {
+        mode: vec![mode_row(&status.mode)],
         title,
         hero: hero_section,
         stats,
@@ -441,6 +541,145 @@ pub fn timeline_changes<'a>(
     TimelineChange {
         dropped_oldest,
         appended: &new[kept..],
+    }
+}
+
+/// Abre a pergunta do modo sobre a janela do aplicativo, com `preselected`
+/// marcado. O sinal `response` é emitido uma vez ao fechar, pelo botão
+/// "Confirmar" ou por Esc e pelo "X" (`close-response`); a trava garante uma
+/// única resposta mesmo se o fechamento for forçado.
+fn present_mode_dialog(
+    root: &gtk::ScrolledWindow,
+    kind: ModeDialogKind,
+    match_number: u64,
+    preselected: GameMode,
+    sender: ComponentSender<HeroPage>,
+) -> adw::AlertDialog {
+    let body = match kind {
+        ModeDialogKind::MatchFound => translate(
+            "O Dota não informa o modo da partida. Fechar sem confirmar mantém o modo marcado \
+             ao abrir.",
+        ),
+        ModeDialogKind::Change => translate("Fechar sem confirmar não altera o modo informado."),
+    };
+    let dialog = adw::AlertDialog::new(
+        Some(&translate("Qual o modo de jogo iniciado?")),
+        Some(&body),
+    );
+    let options = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let mut buttons: Vec<(GameMode, gtk::CheckButton)> = Vec::new();
+    for mode in GameMode::ALL {
+        let button = gtk::CheckButton::with_label(&mode_label(mode));
+        if let Some((_, first)) = buttons.first() {
+            button.set_group(Some(first));
+        }
+        button.set_active(mode == preselected);
+        options.append(&button);
+        buttons.push((mode, button));
+    }
+    dialog.set_extra_child(Some(&options));
+    dialog.add_response(CONFIRM_RESPONSE, &translate("Confirmar"));
+    dialog.set_response_appearance(CONFIRM_RESPONSE, adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some(CONFIRM_RESPONSE));
+    dialog.set_close_response(CLOSE_RESPONSE);
+
+    let answered = Rc::new(Cell::new(false));
+    dialog.connect_response(None, move |_, response| {
+        if answered.replace(true) {
+            return;
+        }
+        let selected = buttons
+            .iter()
+            .find(|(_, button)| button.is_active())
+            .map_or(preselected, |(mode, _)| *mode);
+        let confirmed = response == CONFIRM_RESPONSE;
+        if let Some((mode, origin)) = mode_dialog_outcome(kind, confirmed, preselected, selected) {
+            sender.input(HeroMessage::ChooseMode {
+                match_number,
+                mode,
+                origin,
+            });
+        }
+    });
+    dialog.present(Some(root));
+    dialog
+}
+
+/// Resposta do botão "Confirmar" na pergunta do modo.
+const CONFIRM_RESPONSE: &str = "confirm";
+/// Resposta de Esc e do "X" na pergunta do modo.
+const CLOSE_RESPONSE: &str = "close";
+
+/// Partida cuja pergunta do modo ainda não foi aberta, com o modo
+/// pré-selecionado. Cada partida encontrada abre a pergunta uma vez só.
+pub fn mode_dialog_request(status: &MatchStatus, handled_match: u64) -> Option<(u64, GameMode)> {
+    match status.mode {
+        ModeState::Awaiting { preselected } if status.match_number > handled_match => {
+            Some((status.match_number, preselected))
+        }
+        _ => None,
+    }
+}
+
+/// Modo e origem a gravar quando a pergunta fecha. Só "Confirmar" é escolha
+/// explícita; fechar a pergunta da partida encontrada vale o modo marcado ao
+/// abrir, descartando mudanças não confirmadas, e fechar a alteração não muda
+/// nada.
+pub fn mode_dialog_outcome(
+    kind: ModeDialogKind,
+    confirmed: bool,
+    preselected: GameMode,
+    selected: GameMode,
+) -> Option<(GameMode, ModeOrigin)> {
+    match (confirmed, kind) {
+        (true, _) => Some((selected, ModeOrigin::Chosen)),
+        (false, ModeDialogKind::MatchFound) => Some((preselected, ModeOrigin::Default)),
+        (false, ModeDialogKind::Change) => None,
+    }
+}
+
+/// Modo a pré-selecionar ao alterar; só há o que alterar depois que o modo da
+/// partida foi informado.
+pub fn change_mode_preselection(status: &MatchStatus) -> Option<GameMode> {
+    match status.mode {
+        ModeState::Confirmed { mode, .. } => Some(mode),
+        ModeState::NotAsked | ModeState::Awaiting { .. } => None,
+    }
+}
+
+/// Linha do modo da partida, com a origem.
+pub fn mode_row(mode: &ModeState) -> RowContent {
+    match mode {
+        ModeState::NotAsked => RowContent::new(
+            Level::Info,
+            &translate("Modo de jogo ainda não informado"),
+            &translate("A pergunta aparece quando uma partida é encontrada."),
+        ),
+        ModeState::Awaiting { .. } => RowContent::new(
+            Level::Warning,
+            &translate("Modo de jogo aguardando confirmação"),
+            &translate("Responda à pergunta aberta sobre o modo da partida."),
+        ),
+        ModeState::Confirmed { mode, origin } => RowContent::new(
+            Level::Info,
+            &translate_with("Modo de jogo: {}", &[&mode_label(*mode)]),
+            &mode_origin_label(*origin),
+        ),
+    }
+}
+
+pub fn mode_label(mode: GameMode) -> String {
+    match mode {
+        GameMode::AllPick => translate("Escolha Livre"),
+        GameMode::Turbo => translate("Turbo"),
+        GameMode::Bots => translate("Contra bots"),
+    }
+}
+
+pub fn mode_origin_label(origin: ModeOrigin) -> String {
+    match origin {
+        ModeOrigin::Chosen => translate("Informado por você"),
+        ModeOrigin::Default => translate("Modo padrão"),
     }
 }
 
