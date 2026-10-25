@@ -4,7 +4,7 @@
 use std::time::SystemTime;
 
 use crate::application::state::{MatchStatus, TimelineEntry};
-use crate::domain::game::GameSnapshot;
+use crate::domain::game::{GamePhase, GameSnapshot};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, MatchSummary};
 
 /// Quantidade máxima de eventos guardados na linha do tempo; os mais antigos
@@ -12,7 +12,9 @@ use crate::domain::match_events::{MatchEvent, MatchEventKind, MatchSummary};
 pub const TIMELINE_LIMIT: usize = 200;
 
 /// Atualiza o estado atual e acrescenta os eventos. Uma partida encontrada
-/// começa uma linha do tempo nova; o fim da partida guarda o resumo dela.
+/// começa uma linha do tempo nova; o fim da partida guarda o resumo dela, que
+/// é refeito a cada evento do pós-jogo, porque o ID da partida só chega depois
+/// do primeiro deles.
 pub fn record_match_update(
     status: &mut MatchStatus,
     game: GameSnapshot,
@@ -24,6 +26,9 @@ pub fn record_match_update(
             status.last_match = Some(MatchSummary::from_post_game(&game));
         }
         push_event(status, event, at);
+    }
+    if game.phase == Some(GamePhase::PostGame) && status.last_match.is_some() {
+        status.last_match = Some(MatchSummary::from_post_game(&game));
     }
     status.game = Some(game);
 }

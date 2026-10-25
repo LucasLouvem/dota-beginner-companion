@@ -1,7 +1,7 @@
 //! Testes unitários de `src/application/use_cases/track_match.rs`.
 
 use super::*;
-use crate::domain::game::{GamePhase, HeroPick, Team};
+use crate::domain::game::{GamePhase, HeroPick, MatchId, Team};
 use crate::domain::match_events::MatchResult;
 use crate::domain::match_events::Provenance;
 use std::time::{Duration, UNIX_EPOCH};
@@ -233,4 +233,57 @@ fn events_without_match_end_do_not_create_a_summary() {
         at(10),
     );
     assert_eq!(status.last_match, None);
+}
+
+#[test]
+fn match_id_arriving_later_in_post_game_fills_the_summary() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+    assert_eq!(status.last_match.as_ref().unwrap().match_id, None);
+
+    let with_id = GameSnapshot {
+        match_id: MatchId::from_gsi("1234567890"),
+        ..post_game_won_with("npc_dota_hero_dragon_knight")
+    };
+    record_match_update(&mut status, with_id, vec![], at(11));
+
+    assert_eq!(
+        status
+            .last_match
+            .as_ref()
+            .and_then(|summary| summary.match_id.as_ref())
+            .map(MatchId::as_str),
+        Some("1234567890")
+    );
+}
+
+#[test]
+fn post_game_without_tracked_match_end_does_not_create_a_summary() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![],
+        at(10),
+    );
+    assert_eq!(status.last_match, None);
+}
+
+#[test]
+fn menu_after_post_game_keeps_the_summary_unchanged() {
+    let mut status = MatchStatus::default();
+    record_match_update(
+        &mut status,
+        post_game_won_with("npc_dota_hero_dragon_knight"),
+        vec![match_ended()],
+        at(10),
+    );
+    let summary = status.last_match.clone();
+    record_match_update(&mut status, GameSnapshot::menu(), vec![], at(20));
+    assert_eq!(status.last_match, summary);
 }
