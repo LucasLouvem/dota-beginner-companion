@@ -155,7 +155,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - A conferência visual (captura de tela) da interface depois das mudanças de desempenho não foi feita, nem a conferência numa partida real com o jogo aberto. A interface foi conferida só pela leitura de acessibilidade com o log reenviado.
 - A última partida fica só em memória; ela se perde ao fechar o app até existir o histórico.
 
-## Fase 3 — Providers e recomendações
+## Fase 3 — Providers e recomendações -> Atual
 
 **Depende de:** Fase 2
 
@@ -167,6 +167,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Recomendações abaixo da amostra mínima (padrão 10 partidas, configurável) aparecem como "amostra insuficiente", porque uma única partida não serve de base.
 - Toda recomendação mostra fonte, patch, data de atualização e quantidade de partidas, e é apresentada como sugestão estatística.
 - Chaves de API ficam em `.env` ou na configuração local, nunca no código.
+- A fase começa pela conferência numa partida real, com o jogo aberto, da interface depois das mudanças de desempenho da Fase 2 (leitura de acessibilidade e captura de tela), antes de implementar qualquer coisa nova. Na mesma partida, conferir o que o GSI envia sobre o tipo de partida (ver "Em aberto").
 
 **Resultados mínimos esperados:**
 
@@ -179,6 +180,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 - Os termos de uso da STRATZ permitem esse uso?
 - Como filtrar por posição quando a partida não informa a lane?
+- Tipo de partida (contra bots, normal, ranked, turbo): nos eventos gravados até agora, só de partidas contra bots, o bloco `map` não tem campo de modo de jogo nem de tipo de lobby, e o `customgamename` veio vazio. Conferir em partidas normais, ranked e turbo se o GSI envia algo diferente. Se não enviar, a fonte possível é o OpenDota pelo ID da partida, que só chega no `POST_GAME`; os campos dessa resposta precisam ser conferidos na documentação antes do uso. Isso afeta quais dados agregados servem de comparação (turbo tem ritmo de ouro e experiência diferente).
 
 ## Fase 4 — Pós-partida, histórico, notificações e empacotamento
 
@@ -192,6 +194,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Histórico de partidas persistido via `storage` ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
 - Na aba Histórico, cada partida abre uma tela com os dados dela; as últimas partidas jogadas ficam listadas. A apresentação visual é tratada depois do conteúdo.
 - Buscar o histórico pelo SteamID só com consentimento do usuário.
+- Cada evento da linha do tempo passa a guardar também o relógio da partida (`clock_time`, que o normalizador já lê), para mostrar em que minuto de jogo cada coisa aconteceu, como a compra de cada item. O horário de chegada continua. Fica nesta fase, e não na Fase 3, porque a pergunta "em que minuto comprei o item X" é respondida no resumo pós-partida e no histórico; a Fase 3 trata de dados externos agregados, e a comparação com partidas semelhantes, que usaria esse minuto, também é desta fase.
 
 **Resultados mínimos esperados:**
 
@@ -242,3 +245,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
   - teste intermitente de instalação corrigido.
 
   Fase 2 concluída, com a conferência visual e em partida real registrada como pendente. A Fase 3 aguarda confirmação do mantenedor para ser marcada como atual.
+- 2026-10-24 — Fase 3 marcada como atual, a pedido do mantenedor. Ela começa pela conferência no jogo pendente da Fase 2. O relógio da partida em cada evento da linha do tempo entra na Fase 4. O tipo de partida no GSI fica em aberto, para conferir em partidas que não sejam contra bots.
