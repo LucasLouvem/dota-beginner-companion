@@ -107,7 +107,11 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Dados estáticos dos heróis (nome, atributo primário, tipo de ataque, funções e habilidades) vêm de um recorte do [odota/dotaconstants](https://github.com/odota/dotaconstants) (MIT) embutido no binário, com fonte, commit e data registrados. Funciona sem rede e é o dado embutido previsto como último fallback dos providers. A atualização pelo OpenDota fica para a Fase 3.
 - Posição (1 a 5) e dificuldade não fazem parte desta fase: nenhuma fonte verificada traz esses campos (o dotaconstants não tem, o GSI não envia e o log não tem lane), e deduzi-los das funções seria inferência apresentada como dado.
 - Sem Steam e Dota no ambiente de desenvolvimento atual, o comportamento com o jogo é validado reenviando ao aplicativo os eventos gravados em `logs/gsi.jsonl`.
-- A aba Herói mantém o último herói e os dados da última partida jogada (resultado, KDA, farm, mortes) depois que a partida termina, até a próxima começar. Decidido pelo mantenedor depois da partida real, em que o card ficava vazio ao voltar ao menu.
+- A aba Herói mantém o último herói e os dados da última partida jogada (resultado, duração, KDA, farm, mortes, itens) depois que a partida termina, até a próxima partida ser encontrada, de forma automática ou manual. A apresentação visual fica para depois. Decidido pelo mantenedor depois da partida real, em que o card ficava vazio ao voltar ao menu.
+- A configuração continua no `config.toml`, com o token e permissão `0600`; o SQLite fica para cache e, mais tarde, histórico.
+- O botão manual "Partida encontrada" reinicia a linha do tempo, como a detecção automática.
+- O espaço do TP (`teleport0`) não gera eventos na linha do tempo, porque o TP é usado e reposto o tempo todo; ele continua no inventário exibido.
+- Nomes de exibição e receitas dos itens vêm de um recorte de `build/items.json` do mesmo commit do dotaconstants, com o comando do recorte registrado em `assets/dotaconstants/SOURCE.md`. A montagem de um item é inferida quando ele entra na mesma mudança em que saem componentes da receita.
 
 **Resultados mínimos esperados:**
 
@@ -119,7 +123,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 **Verificações:**
 
 - Fixtures anonimizadas de duas partidas reais cobrem menu sem `map`, herói com `id: 0`, compras na estratégia sem itens visíveis, relógio que retrocede, inventário a partir do pré-jogo, nível de habilidade, item movido do stash e morte. A lista de eventos esperada foi escrita à mão e confere com a saída do normalizador e do `MatchTracker`.
-- O fim de partida é coberto por uma fixture sintética, identificada como tal.
+- O fim de partida é coberto por um recorte anonimizado da partida real (montagem do Satanic, pós-jogo com o ID ainda `"0"`, pós-jogo com o ID e volta ao menu); o ID real foi trocado por um fictício. A fixture sintética foi removida.
 - O storage tem testes de gravação, leitura, expiração por TTL com dado vencido marcado como antigo, limpeza, reabertura, banco corrompido, pasta sem permissão e schema mais novo.
 - Com o log real (849 eventos) reenviado ao app aberto, todos foram aceitos. A aba Herói mostrou Zeus com atributo, ataque e funções dos dados embutidos, as habilidades com os níveis do GSI e a linha do tempo na ordem certa. O botão "Partida encontrada" registrou o evento como manual. A conferência foi feita pela acessibilidade (AT-SPI) e por captura de tela.
 - Partida real completa contra bots com o app aberto (Dragon Knight, vitória, 2.425 eventos, do menu ao pós-jogo), conferida pela acessibilidade contra o log gravado:
@@ -127,16 +131,15 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
   - as 15 subidas de habilidade e as 33 alterações de inventário do log apareceram, com a origem correta;
   - o Diagnóstico contou 2.425 eventos recebidos e gravados, igual ao arquivo.
 - Observado nessa partida: `map.matchid` passa de `"0"` para o ID real no `POST_GAME`; `win_team` e `player.team_name` permitem o resultado; o estado de carregamento do mapa não apareceu, então não é garantido.
+- O log continuou gravando mais três partidas completas (Dragon Knight, Axe e Dawnbreaker; 10.892 eventos no total). Nelas apareceu `DOTA_GAMERULES_STATE_WAIT_FOR_PLAYERS_TO_LOAD` antes da seleção de heróis, e o app aberto deixou de registrar partida encontrada, início e fim a partir da segunda partida. A detecção foi corrigida para considerar essa fase, com teste da sequência.
+- O primeiro evento de `POST_GAME` ainda traz o ID `"0"`; o ID real vem no evento seguinte. O resumo da última partida é refeito a cada evento do pós-jogo, com teste.
+- O log completo passado pelo normalizador, pelo `MatchTracker` com as receitas embutidas e pelo estado da partida (sem a interface) deu 4 partidas encontradas, iniciadas e terminadas, com os resultados do log, 19 montagens de itens, nenhum evento de TP, e a aba Herói no fim com a última partida (Dawnbreaker, derrota, 17:40, 2/7/0, 34/0, GPM 481, XPM 1350, nível 21 e o ID da partida).
 
 **Em aberto:**
 
 - Fonte verificável para posição (1 a 5) e dificuldade dos heróis.
-- Ao voltar ao menu depois da partida, a aba Herói fica vazia: falta implementar a decisão de manter o último herói e os dados da última partida.
-- Itens aparecem com o nome interno (`item_satanic`); os dados embutidos só têm heróis e habilidades.
-- A linha do tempo trata itens neutros, TP consumido e montagem de itens como entradas e saídas comuns do inventário.
-- Trocar a fixture sintética de fim de partida por um recorte anonimizado da partida real.
-- O escopo cita "cache e configurações" no SQLite. Só o cache foi implementado: a configuração continua no `config.toml` (com o token e permissão `0600`). Falta decidir se alguma configuração deve ir para o SQLite.
-- Marcar "Partida encontrada" reinicia a linha do tempo, como a detecção automática. Falta decidir se o clique manual deve só acrescentar o evento.
+- Com eventos chegando muito mais rápido que no jogo (reenvio do log a 1 ms ou 25 ms por evento), a interface passa de 80% de CPU e deixa de responder, porque redesenha as listas inteiras a cada estado. No jogo (cerca de 1,5 evento por segundo) ela acompanhou sem problema. Por isso a conferência visual da última partida depois das mudanças desta fase não foi concluída pela acessibilidade.
+- A última partida fica só em memória; ela se perde ao fechar o app até existir o histórico.
 
 ## Fase 3 — Providers e recomendações
 
@@ -218,3 +221,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fase 2 marcada como atual. Decididos: dados dos heróis embutidos a partir do dotaconstants, posição e dificuldade fora da fase por falta de fonte, storage com `rusqlite` (`bundled`) e validação com o log reenviado ao app enquanto não há Dota no ambiente.
 - 2026-10-24 — Fase 2 implementada na branch `feat/phase-2-game-state-hero-storage`: normalizador do GSI, eventos de partida com origem, linha do tempo, "Partida encontrada" manual, aba Herói com dados embutidos do dotaconstants, cache em SQLite e ferramenta de reenvio do log. Aguardando revisão do mantenedor antes de marcar a fase como concluída.
 - 2026-10-24 — Fase 2 mesclada na `master` e conferida numa partida real completa contra bots: linha do tempo, habilidades, inventário e fim de partida conferem com o log. Registrados o `matchid` real no `POST_GAME`, a decisão de manter o último herói e os dados da última partida na aba Herói, a tela de partida no Histórico e os pontos em aberto de nomes de itens e da linha do tempo.
+- 2026-10-24 — Pendências da Fase 2 implementadas: relógio e ID da partida no estado, catálogo de itens embutido, TP fora da linha do tempo, itens neutros, montagem de itens pela receita, resumo e última partida na aba Herói com estatísticas e itens, e fixture real de fim de partida. Corrigidos a detecção de partida após `WAIT_FOR_PLAYERS_TO_LOAD` e o ID que chega depois do primeiro `POST_GAME`. Registradas as decisões de configuração no `config.toml`, botão manual reiniciando a linha do tempo e TP fora da linha do tempo, e o desempenho da interface com eventos muito rápidos.
