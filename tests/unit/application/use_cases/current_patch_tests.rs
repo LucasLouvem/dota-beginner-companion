@@ -1,7 +1,7 @@
 //! Testes unitários de `src/application/use_cases/current_patch.rs`.
 
 use super::*;
-use crate::application::ports::{BoxFuture, ProviderError};
+use crate::application::ports::{BoxFuture, BudgetError, ProviderError};
 use crate::application::use_cases::fallback::DataOrigin;
 use crate::test_support::MemoryCache;
 use std::io;
@@ -18,6 +18,7 @@ impl StatsProvider for FixedProvider {
         &'a self,
         _query: &'a StatsQuery,
         _category: CallCategory,
+        _budget: &'a dyn CallBudget,
     ) -> BoxFuture<'a, Result<String, ProviderError>> {
         Box::pin(async move {
             self.response
@@ -35,6 +36,15 @@ impl StatsProvider for FixedProvider {
             detail: "não é um número",
         })?;
         Ok(PatchCatalog::new(vec![patch(id)]))
+    }
+}
+
+/// Orçamento que sempre concede.
+struct UnlimitedBudget;
+
+impl CallBudget for UnlimitedBudget {
+    fn reserve(&self, _category: CallCategory, _now: SystemTime) -> Result<(), BudgetError> {
+        Ok(())
     }
 }
 
@@ -58,7 +68,14 @@ async fn load(
     cache: Arc<MemoryCache>,
     now: SystemTime,
 ) -> Sourced<Patch> {
-    load_current_patch(Arc::new(FixedProvider { response }), cache, now, embedded()).await
+    load_current_patch(
+        Arc::new(FixedProvider { response }),
+        Arc::new(UnlimitedBudget),
+        cache,
+        now,
+        embedded(),
+    )
+    .await
 }
 
 #[tokio::test]

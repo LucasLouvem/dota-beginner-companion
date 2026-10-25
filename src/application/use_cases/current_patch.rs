@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::application::ports::{CacheStore, CallCategory, StatsProvider, StatsQuery};
+use crate::application::ports::{CacheStore, CallBudget, CallCategory, StatsProvider, StatsQuery};
 use crate::domain::patch::{Patch, PatchCatalog};
 
 use super::fallback::{Sourced, load_with_fallback};
@@ -15,6 +15,7 @@ pub const PATCH_TTL: Duration = Duration::from_secs(6 * 3600);
 /// Patch atual (o de maior ID) e de onde veio a lista.
 pub async fn load_current_patch(
     provider: Arc<dyn StatsProvider>,
+    budget: Arc<dyn CallBudget>,
     cache: Arc<dyn CacheStore>,
     now: SystemTime,
     embedded: Option<PatchCatalog>,
@@ -26,7 +27,11 @@ pub async fn load_current_patch(
         query.cache_key(),
         PATCH_TTL,
         now,
-        || async { provider.fetch(&query, CallCategory::OnDemand).await },
+        || async {
+            provider
+                .fetch(&query, CallCategory::OnDemand, budget.as_ref())
+                .await
+        },
         move |raw| decoder.decode_patches(raw),
         embedded,
     )

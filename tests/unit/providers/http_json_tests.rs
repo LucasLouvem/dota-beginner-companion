@@ -118,8 +118,8 @@ fn config(base_url: &str) -> HttpJsonConfig {
     }
 }
 
-fn client(base_url: &str, budget: &Arc<CountingBudget>) -> HttpJsonClient {
-    HttpJsonClient::new(config(base_url), budget.clone() as Arc<dyn CallBudget>).unwrap()
+fn client(base_url: &str) -> HttpJsonClient {
+    HttpJsonClient::new(config(base_url)).unwrap()
 }
 
 #[tokio::test]
@@ -127,8 +127,8 @@ async fn returns_json_with_one_reservation_and_the_app_user_agent() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
 
-    let value = client(&base_url, &budget)
-        .get_json("/ok", CallCategory::OnDemand)
+    let value = client(&base_url)
+        .get_json("/ok", CallCategory::OnDemand, budget.as_ref())
         .await
         .unwrap();
 
@@ -143,8 +143,8 @@ async fn retries_after_429_and_each_attempt_uses_budget() {
     let (base_url, server) = start_server(1).await;
     let budget = CountingBudget::with_limit(10);
 
-    let value = client(&base_url, &budget)
-        .get_json("/limited", CallCategory::Collection)
+    let value = client(&base_url)
+        .get_json("/limited", CallCategory::Collection, budget.as_ref())
         .await
         .unwrap();
 
@@ -158,8 +158,8 @@ async fn gives_up_as_rate_limited_after_the_last_attempt() {
     let (base_url, server) = start_server(u32::MAX).await;
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&base_url, &budget)
-        .get_json("/limited", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/limited", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -175,8 +175,8 @@ async fn exhausted_budget_sends_no_request() {
     let (base_url, server) = start_server(0).await;
     let budget = CountingBudget::with_limit(0);
 
-    let result = client(&base_url, &budget)
-        .get_json("/ok", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/ok", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -194,8 +194,8 @@ async fn budget_ending_during_retries_stops_the_retries() {
     let (base_url, server) = start_server(u32::MAX).await;
     let budget = CountingBudget::with_limit(2);
 
-    let result = client(&base_url, &budget)
-        .get_json("/limited", CallCategory::Collection)
+    let result = client(&base_url)
+        .get_json("/limited", CallCategory::Collection, budget.as_ref())
         .await;
 
     assert!(
@@ -210,8 +210,8 @@ async fn slow_response_is_a_timeout() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&base_url, &budget)
-        .get_json("/slow", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/slow", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -225,8 +225,8 @@ async fn server_error_is_an_unexpected_status() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&base_url, &budget)
-        .get_json("/broken", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/broken", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -243,8 +243,8 @@ async fn body_over_the_limit_is_refused() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&base_url, &budget)
-        .get_json("/huge", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/huge", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -258,8 +258,8 @@ async fn body_that_is_not_json_is_invalid_json() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&base_url, &budget)
-        .get_json("/not-json", CallCategory::OnDemand)
+    let result = client(&base_url)
+        .get_json("/not-json", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -275,8 +275,8 @@ async fn nothing_listening_is_unreachable() {
     drop(listener);
     let budget = CountingBudget::with_limit(10);
 
-    let result = client(&format!("http://{address}"), &budget)
-        .get_json("/ok", CallCategory::OnDemand)
+    let result = client(&format!("http://{address}"))
+        .get_json("/ok", CallCategory::OnDemand, budget.as_ref())
         .await;
 
     assert!(
@@ -289,22 +289,19 @@ async fn nothing_listening_is_unreachable() {
 async fn calls_keep_the_minimum_interval_between_them() {
     let (base_url, _server) = start_server(0).await;
     let budget = CountingBudget::with_limit(10);
-    let spaced = HttpJsonClient::new(
-        HttpJsonConfig {
-            min_interval: Duration::from_millis(200),
-            ..config(&base_url)
-        },
-        budget.clone() as Arc<dyn CallBudget>,
-    )
+    let spaced = HttpJsonClient::new(HttpJsonConfig {
+        min_interval: Duration::from_millis(200),
+        ..config(&base_url)
+    })
     .unwrap();
 
     let started = Instant::now();
     spaced
-        .get_json("/ok", CallCategory::OnDemand)
+        .get_json("/ok", CallCategory::OnDemand, budget.as_ref())
         .await
         .unwrap();
     spaced
-        .get_json("/ok", CallCategory::OnDemand)
+        .get_json("/ok", CallCategory::OnDemand, budget.as_ref())
         .await
         .unwrap();
 

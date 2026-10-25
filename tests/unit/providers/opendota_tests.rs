@@ -6,7 +6,6 @@ use crate::application::ports::{BudgetError, CallBudget};
 use crate::providers::http_json::HttpJsonConfig;
 use axum::Router;
 use axum::routing::get;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 const PATCH_RESPONSE: &str = include_str!(concat!(
@@ -34,7 +33,7 @@ async fn provider_serving(path: &'static str, body: &'static str) -> OpenDotaPro
         min_interval: Duration::ZERO,
         ..HttpJsonConfig::opendota()
     };
-    OpenDotaProvider::new(HttpJsonClient::new(config, Arc::new(UnlimitedBudget)).unwrap())
+    OpenDotaProvider::new(HttpJsonClient::new(config).unwrap())
 }
 
 #[test]
@@ -93,7 +92,11 @@ async fn fetches_patches_from_the_constants_path() {
     let provider = provider_serving("/constants/patch", PATCH_RESPONSE).await;
 
     let raw = provider
-        .fetch(&StatsQuery::Patches, CallCategory::OnDemand)
+        .fetch(
+            &StatsQuery::Patches,
+            CallCategory::OnDemand,
+            &UnlimitedBudget,
+        )
         .await
         .unwrap();
 

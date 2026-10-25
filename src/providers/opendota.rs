@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 use crate::application::ports::{
-    BoxFuture, CallCategory, ProviderError, StatsProvider, StatsQuery,
+    BoxFuture, CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
 };
 use crate::domain::patch::{Patch, PatchCatalog};
 
@@ -34,11 +34,12 @@ impl StatsProvider for OpenDotaProvider {
         &'a self,
         query: &'a StatsQuery,
         category: CallCategory,
+        budget: &'a dyn CallBudget,
     ) -> BoxFuture<'a, Result<String, ProviderError>> {
         Box::pin(async move {
             let path = path(query);
             self.http
-                .get_json(&path, category)
+                .get_json(&path, category, budget)
                 .await
                 .map(|value| value.to_string())
         })

@@ -481,12 +481,14 @@ impl StatsQuery {
 
 /// Fonte de estatísticas do jogo (o OpenDota). `fetch` traz a resposta como
 /// texto JSON, que vai para o cache; os `decode_*` a convertem, para a
-/// aplicação não depender do formato da fonte.
+/// aplicação não depender do formato da fonte. Cada tentativa de `fetch`
+/// reserva uma chamada em `budget`.
 pub trait StatsProvider: Send + Sync {
     fn fetch<'a>(
         &'a self,
         query: &'a StatsQuery,
         category: CallCategory,
+        budget: &'a dyn CallBudget,
     ) -> BoxFuture<'a, Result<String, ProviderError>>;
 
     /// Patches a partir da resposta de `StatsQuery::Patches`.

@@ -1,6 +1,6 @@
 //! Cliente HTTP de JSON para APIs externas, com tempo limite, limite de
 //! tamanho da resposta, intervalo mínimo entre chamadas, nova tentativa no
-//! HTTP 429 e reserva no orçamento antes de cada tentativa.
+//! HTTP 429 e reserva no orçamento recebido antes de cada tentativa.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -74,17 +74,13 @@ impl ToDiagnostic for HttpJsonClientError {
 pub struct HttpJsonClient {
     client: reqwest::Client,
     config: HttpJsonConfig,
-    budget: Arc<dyn CallBudget>,
     /// Início da última chamada; o `Mutex` assíncrono serializa as chamadas
     /// sem bloquear a thread enquanto uma espera o intervalo.
     last_call: Mutex<Option<Instant>>,
 }
 
 impl HttpJsonClient {
-    pub fn new(
-        config: HttpJsonConfig,
-        budget: Arc<dyn CallBudget>,
-    ) -> Result<Self, HttpJsonClientError> {
+    pub fn new(config: HttpJsonConfig) -> Result<Self, HttpJsonClientError> {
         let client = reqwest::Client::builder()
             .timeout(config.timeout)
             .user_agent(USER_AGENT)
@@ -93,22 +89,22 @@ impl HttpJsonClient {
         Ok(Self {
             client,
             config,
-            budget,
             last_call: Mutex::new(None),
         })
     }
 
     /// Busca `path` (como `/constants/patch`) e devolve o JSON. Cada
     /// tentativa, inclusive depois de um 429, reserva uma chamada da
-    /// `category` no orçamento antes de sair.
+    /// `category` em `budget` antes de sair.
     pub async fn get_json(
         &self,
         path: &str,
         category: CallCategory,
+        budget: &dyn CallBudget,
     ) -> Result<serde_json::Value, ProviderError> {
         let mut attempt = 1;
         loop {
-            self.budget.reserve(category, SystemTime::now())?;
+            budget.reserve(category, SystemTime::now())?;
             let response = self.send(path).await?;
             if response.status() != StatusCode::TOO_MANY_REQUESTS {
                 return self.read_json(path, response).await;
