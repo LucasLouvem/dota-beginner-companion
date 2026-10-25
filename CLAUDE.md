@@ -79,6 +79,14 @@ conforme [`docs/COMMITS.md`](docs/COMMITS.md).
    terminou se algum check falhou; informe o que falhou e por quê.
 6. **Resuma ao final:** o que mudou, por quê, e o que ficou
    pendente ou merece atenção.
+7. **Acompanhe no GitHub.** Cada fase do plano é uma milestone e
+   cada passo é uma issue em português, com os labels certos, no
+   quadro "Dota Beginner Companion" do GitHub Projects. Problema,
+   pendência ou decisão em aberto encontrado durante o trabalho
+   vira issue na milestone da fase; fase nova vira milestone. Ao
+   começar uma issue, mova-a para "In Progress"; ao concluir,
+   feche-a citando o commit e mova-a para "Done". O plano em
+   `plans/` continua sendo a fonte das decisões.
 
 ---
 
