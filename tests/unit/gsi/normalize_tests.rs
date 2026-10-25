@@ -164,3 +164,49 @@ fn unknown_game_state_is_kept() {
 fn payload_that_is_not_an_object_is_like_menu() {
     assert_eq!(game_snapshot(&json!([1, 2, 3])), GameSnapshot::menu());
 }
+
+#[test]
+fn reads_negative_clock_before_match_starts() {
+    assert_eq!(zeus()[1].clock_time, Some(-74));
+}
+
+#[test]
+fn zero_match_id_during_bot_match_is_no_id() {
+    assert!(zeus().iter().all(|snapshot| snapshot.match_id.is_none()));
+}
+
+#[test]
+fn reads_real_match_id_and_clock_from_post_game() {
+    let snapshot = game_snapshot(&json!({
+        "map": {
+            "game_state": "DOTA_GAMERULES_STATE_POST_GAME",
+            "clock_time": 1429,
+            "matchid": "9060449998",
+        }
+    }));
+    assert_eq!(snapshot.clock_time, Some(1429));
+    assert_eq!(
+        snapshot.match_id.as_ref().map(MatchId::as_str),
+        Some("9060449998")
+    );
+}
+
+#[test]
+fn clock_and_match_id_with_unexpected_types_are_no_data() {
+    let snapshot = game_snapshot(&json!({
+        "map": {
+            "game_state": "DOTA_GAMERULES_STATE_GAME_IN_PROGRESS",
+            "clock_time": "300",
+            "matchid": 9060449998_u64,
+        }
+    }));
+    assert_eq!(snapshot.phase, Some(GamePhase::InProgress));
+    assert_eq!(snapshot.clock_time, None);
+    assert_eq!(snapshot.match_id, None);
+}
+
+#[test]
+fn clock_outside_the_supported_range_is_no_data() {
+    let snapshot = game_snapshot(&json!({ "map": { "clock_time": i64::MAX } }));
+    assert_eq!(snapshot.clock_time, None);
+}

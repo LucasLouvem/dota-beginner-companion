@@ -65,6 +65,25 @@ impl Team {
     }
 }
 
+/// ID da partida no Dota (`map.matchid`). Contra bots o GSI envia `"0"`
+/// durante a partida; o ID real só chega no pós-jogo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchId(String);
+
+impl MatchId {
+    /// `None` para `"0"`, texto vazio ou valor que não seja só dígitos.
+    pub fn from_gsi(value: &str) -> Option<Self> {
+        let is_real_id = !value.is_empty()
+            && value.bytes().all(|byte| byte.is_ascii_digit())
+            && value.bytes().any(|byte| byte != b'0');
+        is_real_id.then(|| Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Herói do jogador. Antes da escolha o GSI envia `hero: {"id": 0}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeroPick {
@@ -112,6 +131,11 @@ pub struct PlayerStats {
 pub struct GameSnapshot {
     /// `None` quando o evento não tem o bloco `map`, como no menu do Dota.
     pub phase: Option<GamePhase>,
+    /// Relógio da partida em segundos (`map.clock_time`). É negativo antes do
+    /// início e volta entre fases; não serve para ordenar eventos.
+    pub clock_time: Option<i32>,
+    /// `None` enquanto o Dota não informa um ID real.
+    pub match_id: Option<MatchId>,
     pub hero: HeroPick,
     pub hero_level: Option<u32>,
     pub hero_alive: Option<bool>,
@@ -131,6 +155,8 @@ impl GameSnapshot {
     pub fn menu() -> Self {
         Self {
             phase: None,
+            clock_time: None,
+            match_id: None,
             hero: HeroPick::NotPicked,
             hero_level: None,
             hero_alive: None,

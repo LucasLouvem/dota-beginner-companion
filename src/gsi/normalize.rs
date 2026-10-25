@@ -5,7 +5,7 @@
 use serde_json::{Map, Value};
 
 use crate::domain::game::{
-    AbilityState, CarriedItem, GamePhase, GameSnapshot, HeroPick, PlayerStats, Team,
+    AbilityState, CarriedItem, GamePhase, GameSnapshot, HeroPick, MatchId, PlayerStats, Team,
 };
 
 /// Espaços do inventário considerados itens do jogador, na ordem exibida.
@@ -44,6 +44,10 @@ pub fn game_snapshot(payload: &Value) -> GameSnapshot {
         phase: map
             .and_then(|map| text(map, "game_state"))
             .map(GamePhase::from_gsi),
+        clock_time: map.and_then(|map| signed_number(map, "clock_time")),
+        match_id: map
+            .and_then(|map| text(map, "matchid"))
+            .and_then(MatchId::from_gsi),
         hero: hero.map_or(HeroPick::NotPicked, hero_pick),
         hero_level: hero.and_then(|hero| number(hero, "level")),
         hero_alive: hero
@@ -142,6 +146,13 @@ fn number(object: &Map<String, Value>, key: &str) -> Option<u32> {
         .get(key)
         .and_then(Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
+}
+
+fn signed_number(object: &Map<String, Value>, key: &str) -> Option<i32> {
+    object
+        .get(key)
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
 }
 
 #[cfg(test)]

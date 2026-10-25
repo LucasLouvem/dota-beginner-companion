@@ -54,3 +54,24 @@ fn reads_only_radiant_and_dire_as_teams() {
     assert_eq!(Team::from_gsi("dire"), Some(Team::Dire));
     assert_eq!(Team::from_gsi("none"), None);
 }
+
+#[test]
+fn real_match_id_is_kept_as_received() {
+    assert_eq!(
+        MatchId::from_gsi("9060449998").map(|match_id| match_id.as_str().to_owned()),
+        Some("9060449998".into())
+    );
+}
+
+#[test]
+fn zero_match_id_sent_during_bot_matches_is_no_id() {
+    assert_eq!(MatchId::from_gsi("0"), None);
+    assert_eq!(MatchId::from_gsi("000"), None);
+}
+
+#[test]
+fn empty_or_non_numeric_match_id_is_no_id() {
+    assert_eq!(MatchId::from_gsi(""), None);
+    assert_eq!(MatchId::from_gsi("12a4"), None);
+    assert_eq!(MatchId::from_gsi(" 123"), None);
+}

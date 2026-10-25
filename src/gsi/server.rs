@@ -120,7 +120,7 @@ async fn receive(State(state): State<ServerState>, body: Bytes) -> StatusCode {
     let raw = serde_json::to_string_pretty(&payload)
         .expect("um Value lido de JSON tem só chaves de texto e sempre volta a ser serializado");
     // O evento de teste é sintético e não descreve uma partida.
-    let game = (!is_test).then(|| normalize::game_snapshot(&payload));
+    let game = (!is_test).then(|| Box::new(normalize::game_snapshot(&payload)));
     let delivered = state
         .events
         .send(CoreEvent::GsiAccepted {

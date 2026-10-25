@@ -109,7 +109,7 @@ async fn replays_every_logged_event_as_dota_event_in_order() {
             panic!("esperava um evento aceito: {event:?}");
         };
         assert!(!is_test);
-        games.push(game.expect("eventos do Dota são normalizados"));
+        games.push(*game.expect("eventos do Dota são normalizados"));
     }
     assert_eq!(games[0].phase, None);
     assert_eq!(games[1].phase, Some(GamePhase::HeroSelection));

@@ -20,8 +20,9 @@ pub enum CoreEvent {
         at: SystemTime,
         /// Evento enviado pelo botão "Testar conexão", não pelo Dota.
         is_test: bool,
-        /// Estado de jogo normalizado; ausente nos eventos de teste.
-        game: Option<GameSnapshot>,
+        /// Estado de jogo normalizado; ausente nos eventos de teste. Fica em
+        /// `Box` porque é bem maior que as outras variantes do evento.
+        game: Option<Box<GameSnapshot>>,
     },
     GsiRejected {
         reason: RejectReason,

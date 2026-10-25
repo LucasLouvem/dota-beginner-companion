@@ -63,7 +63,8 @@ pub async fn run(
                 }
                 let match_update = match &event {
                     CoreEvent::GsiAccepted { game: Some(game), at, .. } => {
-                        Some((game.clone(), match_tracker.observe(game.clone()), *at))
+                        let game = (**game).clone();
+                        Some((game.clone(), match_tracker.observe(game), *at))
                     }
                     _ => None,
                 };

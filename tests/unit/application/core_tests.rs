@@ -140,7 +140,7 @@ fn dota_event() -> CoreEvent {
         raw: format!(r#"{{"player":{{"name":"{SIMULATED_SECRET}"}}}}"#).into(),
         at: SystemTime::now(),
         is_test: false,
-        game: Some(GameSnapshot::menu()),
+        game: Some(Box::new(GameSnapshot::menu())),
     }
 }
 
@@ -149,10 +149,10 @@ fn dota_event_in(phase: GamePhase) -> CoreEvent {
         raw: "{}".into(),
         at: SystemTime::now(),
         is_test: false,
-        game: Some(GameSnapshot {
+        game: Some(Box::new(GameSnapshot {
             phase: Some(phase),
             ..GameSnapshot::menu()
-        }),
+        })),
     }
 }
 
