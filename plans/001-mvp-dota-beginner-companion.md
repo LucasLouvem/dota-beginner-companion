@@ -159,29 +159,41 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 **Depende de:** Fase 2
 
-**Escopo:** integração com o OpenDota (constantes, patch, partidas profissionais recentes, detalhes de partidas), cache com fallback e cálculo de frequência de itens, momento médio de compra, taxa de vitória e ordem de habilidades. Abas Itens, Habilidades e Dados profissionais. Provider STRATZ opcional, ativo só com token configurado. Inclui a escolha manual do modo de jogo, pré-requisito das recomendações.
+**Escopo:** integração com o OpenDota (patch, popularidade de itens, partidas profissionais, detalhes de partidas e partidas públicas), cache com fallback, orçamento de chamadas, coleta de partidas públicas em segundo plano e agregação de builds e da ordem de habilidades. Abas Itens, Habilidades e Dados profissionais. Inclui a escolha manual do modo de jogo, pré-requisito das recomendações.
 
 **Decisões tomadas:**
 
-- Interface de provider com fallback para cache vencido e dados embutidos, para nunca depender só de uma API externa ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
-- Recomendações abaixo da amostra mínima (padrão 10 partidas, configurável) aparecem como "amostra insuficiente", porque uma única partida não serve de base.
+- Interface de provider com fallback, nesta ordem: dado novo da API, cache vencido marcado como antigo, dados embutidos só onde existem (catálogos de itens, heróis, habilidades e patch) e, sem nenhum deles, "sem dados". Não há builds nem estatísticas embutidas ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
 - Toda recomendação mostra fonte, patch, data de atualização e quantidade de partidas, e é apresentada como sugestão estatística.
 - Chaves de API ficam em `.env` ou na configuração local, nunca no código.
 - O modo de jogo é escolhido pelo usuário, porque o GSI não o informa. Nas partidas de teste de 2026-10-25 (uma contra bots e uma turbo com matchmaking), nenhum campo indicou o modo; o `matchid` real chegou antes da seleção de heróis só na turbo, e o pré-jogo foi mais curto nela, mas são indícios de uma amostra e não decidem o modo. As recomendações precisam do modo para não misturar turbo com partidas normais, por isso a escolha entra nesta fase.
 - Ao encontrar a partida, o app pergunta o modo numa janela sobre ele mesmo, nunca sobre o jogo, com Escolha Livre, Turbo e Contra bots. A pré-seleção é o último modo confirmado na execução (Escolha Livre na primeira partida). Só "Confirmar" conta como escolha do usuário; fechar a pergunta vale o modo pré-selecionado como modo padrão. O modo pode ser alterado depois na aba Herói, sem reiniciar a partida, e fica só em memória.
 - A fase começa pela conferência numa partida real, com o jogo aberto, da interface depois das mudanças de desempenho da Fase 2 (leitura de acessibilidade e captura de tela), antes de implementar qualquer coisa nova. Na mesma partida, conferir o que o GSI envia sobre o tipo de partida (ver "Em aberto").
+- Modos no OpenDota: Escolha Livre usa `game_mode` 1 e 22, Turbo usa 23 e Contra bots usa os dados de Escolha Livre, com aviso. Ranqueada depende de `lobby_type` e não é inferida pelo `game_mode`.
+- A aba Itens mostra, em cima, até 3 builds de partidas profissionais com a maior taxa de vitória observada (em Turbo, com o aviso de que partidas profissionais não são turbo) e, embaixo, até 5 builds de partidas públicas do modo, da maior para a menor taxa. A popularidade por fase (`/heroes/{hero_id}/itemPopularity`, de partidas profissionais) é uma seção complementar, porque não traz builds, ordem de compra nem taxa de vitória.
+- Uma build é aproximada a partir dos dados disponíveis, não é um evento do jogo. Item grande tem receita e custo de pelo menos 2000. Em partida analisada, vale o primeiro registro de cada item grande no `purchase_log`, sem componentes, em ordem do primeiro horário e sem repetição; os 3 primeiros formam a build ordenada. Sem esse registro, valem os 3 primeiros itens grandes do inventário final, como conjunto sem ordem. Com menos de 3 itens grandes, a partida não forma build.
+- As builds são ordenadas pela taxa de vitória, com desempate pelo tamanho da amostra, e só aparecem com pelo menos 10 partidas; a amostra é sempre exibida. É uma métrica simples, que pode ser aprimorada depois.
+- `/heroes/{hero_id}/matches` não é documentado como lista de partidas profissionais: só contam as com `leagueid` diferente de zero, conferido também nos detalhes da partida.
+- Partidas públicas são coletadas em segundo plano, com o app aberto, a partir de `/publicMatches` (amostra aleatória que traz só os heróis), com os detalhes de cada partida e o cursor guardados no SQLite.
+- O orçamento de chamadas é uma política própria e conservadora do aplicativo, não um limite oficial do OpenDota: contadores diário e mensal no SQLite, reserva antes de cada chamada (incluindo novas tentativas e respostas 429) e categorias separadas, em que as consultas da tela têm prioridade sobre a coleta. O padrão é 1.000 chamadas por dia, com até 700 para a coleta.
+- As recomendações não filtram por posição; a aba Itens informa isso.
+- O provider STRATZ saiu desta fase e foi para a milestone "Fontes de dados extras", até os termos de uso serem confirmados.
 
 **Resultados mínimos esperados:**
 
-- Testes com HTTP simulado cobrem resposta válida, erro de rede, limite de requisições (429) e resposta malformada, sem acessar a internet.
-- Testes de agregação cobrem frequência, momento médio, taxa de vitória com e sem amostra suficiente e ordem de habilidades mais comum.
-- Com a rede desligada e cache existente, as abas mostram os dados marcados como antigos. Sem cache, mostram os dados embutidos.
-- A aba Itens mostra, para o herói atual, item, frequência, taxa de vitória (quando houver), momento médio, contexto de uso, partidas analisadas, patch e fonte.
+- Testes com HTTP simulado cobrem resposta válida, erro de rede, tempo esgotado, limite de requisições (429), corpo grande demais e resposta malformada, sem acessar a internet.
+- Testes de agregação cobrem a montagem da build, empate, amostra insuficiente, taxa de 100% em amostra pequena, momento médio e ordem de habilidades.
+- Uma resposta antiga de outro herói ou modo não substitui a consulta atual, com teste determinístico.
+- O banco local migra da versão 1 para a 2 de forma atômica, com testes de banco antigo, corrompido e de versão futura.
+- Com a rede desligada e cache existente, as abas mostram os dados marcados como antigos. Sem cache, mostram "sem dados".
+- A aba Itens mostra, para o herói atual e o modo informado, as builds profissionais e públicas com taxa de vitória, amostra, momento médio quando houver, patch e fonte.
 
 **Em aberto:**
 
-- Os termos de uso da STRATZ permitem esse uso?
-- Como filtrar por posição quando a partida não informa a lane?
+- Na coleta pública, se as partidas não analisadas (a maioria) entram com o inventário final como build sem ordem ou são descartadas.
+- Com 30 partidas profissionais válidas por herói, poucas builds devem chegar à amostra mínima: aumentar as partidas válidas, reduzir a amostra mínima só para as profissionais ou aceitar "amostra insuficiente" frequente.
+- Limites por consulta (60 candidatas, 30 válidas e 40 chamadas) e orçamento diário.
+- Faixas de rank da coleta pública e uso só do patch atual.
 - Guardar o último modo de jogo confirmado entre execuções do app, junto das configurações no SQLite.
 
 ## Fase 4 — Pós-partida, histórico, notificações e empacotamento
@@ -249,3 +261,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
   Fase 2 concluída, com a conferência visual e em partida real registrada como pendente. A Fase 3 aguarda confirmação do mantenedor para ser marcada como atual.
 - 2026-10-24 — Fase 3 marcada como atual, a pedido do mantenedor. Ela começa pela conferência no jogo pendente da Fase 2. O relógio da partida em cada evento da linha do tempo entra na Fase 4. O tipo de partida no GSI fica em aberto, para conferir em partidas que não sejam contra bots.
 - 2026-10-25 — Partidas de teste contra bots e turbo: o GSI não informa o modo de jogo. Decidida e incluída na Fase 3 a escolha manual do modo ao encontrar a partida, como pré-requisito das recomendações.
+- 2026-10-25 — Plano completo da Fase 3 revisado: builds profissionais e públicas por modo, algoritmo da build, orçamento de chamadas como política do app, coleta pública em segundo plano, migração do banco para a versão 2 e proteção contra respostas antigas. A STRATZ saiu da fase para a milestone "Fontes de dados extras".
