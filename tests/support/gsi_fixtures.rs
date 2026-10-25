@@ -14,10 +14,11 @@ pub const DRAGON_KNIGHT_MATCH: &str = include_str!(concat!(
     "/tests/fixtures/gsi/dragon_knight_bot_match.jsonl"
 ));
 
-/// Fim de partida escrito à mão (2 eventos); não comprova o formato real.
-pub const SYNTHETIC_POST_GAME: &str = include_str!(concat!(
+/// Fim real de uma partida contra bots (5 eventos): montagem do Satanic,
+/// pós-jogo com o ID ainda `"0"`, pós-jogo com o ID e volta ao menu.
+pub const DRAGON_KNIGHT_MATCH_END: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/gsi/synthetic_post_game.jsonl"
+    "/tests/fixtures/gsi/dragon_knight_match_end.jsonl"
 ));
 
 /// Payloads de uma fixture, na ordem de chegada.

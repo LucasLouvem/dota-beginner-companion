@@ -1,7 +1,9 @@
 //! Testes unitários de `src/gsi/normalize.rs`.
 
 use super::*;
-use crate::test_support::{DRAGON_KNIGHT_MATCH, SYNTHETIC_POST_GAME, ZEUS_MATCH, fixture_payloads};
+use crate::test_support::{
+    DRAGON_KNIGHT_MATCH, DRAGON_KNIGHT_MATCH_END, ZEUS_MATCH, fixture_payloads,
+};
 use serde_json::json;
 
 fn zeus() -> Vec<GameSnapshot> {
@@ -114,10 +116,22 @@ fn reads_player_stats_and_death_from_match_in_progress() {
 
 #[test]
 fn post_game_reads_winning_team() {
-    let snapshot = game_snapshot(&fixture_payloads(SYNTHETIC_POST_GAME)[1]);
+    let snapshot = game_snapshot(&fixture_payloads(DRAGON_KNIGHT_MATCH_END)[2]);
     assert_eq!(snapshot.phase, Some(GamePhase::PostGame));
-    assert_eq!(snapshot.winner, Some(Team::Dire));
-    assert_eq!(snapshot.team, Some(Team::Dire));
+    assert_eq!(snapshot.winner, Some(Team::Radiant));
+    assert_eq!(snapshot.team, Some(Team::Radiant));
+    assert_eq!(snapshot.clock_time, Some(1429));
+    assert_eq!(snapshot.match_id, None);
+}
+
+#[test]
+fn match_id_arrives_in_a_later_post_game_event() {
+    let snapshot = game_snapshot(&fixture_payloads(DRAGON_KNIGHT_MATCH_END)[3]);
+    assert_eq!(snapshot.phase, Some(GamePhase::PostGame));
+    assert_eq!(
+        snapshot.match_id.as_ref().map(MatchId::as_str),
+        Some("1234567890")
+    );
 }
 
 #[test]

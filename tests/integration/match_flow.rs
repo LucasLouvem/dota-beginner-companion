@@ -22,7 +22,16 @@ fn fixture(name: &str) -> Vec<Value> {
 
 /// Eventos de cada payload, na ordem de chegada.
 fn events_per_payload(name: &str) -> Vec<Vec<MatchEvent>> {
-    let mut tracker = MatchTracker::default();
+    events_with(MatchTracker::default(), name)
+}
+
+/// Como `events_per_payload`, reconhecendo montagens pelas receitas embutidas.
+fn events_with_embedded_recipes(name: &str) -> Vec<Vec<MatchEvent>> {
+    let items = dota_companion::infrastructure::item_data::embedded_catalog().unwrap();
+    events_with(MatchTracker::new(std::sync::Arc::new(items)), name)
+}
+
+fn events_with(mut tracker: MatchTracker, name: &str) -> Vec<Vec<MatchEvent>> {
     fixture(name)
         .iter()
         .map(|payload| tracker.observe(game_snapshot(payload)))
@@ -116,16 +125,36 @@ fn dragon_knight_match_in_progress_produces_level_item_and_death_events() {
 }
 
 #[test]
-fn synthetic_post_game_reports_victory_for_winning_team() {
-    let events = events_per_payload("synthetic_post_game.jsonl");
+fn real_match_end_reports_satanic_assembly_and_victory() {
+    let events = events_with_embedded_recipes("dragon_knight_match_end.jsonl");
 
-    assert_eq!(
-        events,
-        vec![
-            vec![],
-            vec![confirmed(MatchEventKind::MatchEnded {
-                result: MatchResult::Victory,
-            })],
-        ]
+    assert_eq!(events[0], vec![]);
+    assert!(
+        events[1].contains(&inferred(MatchEventKind::ItemAssembled {
+            item: "item_satanic".into(),
+            components: vec![
+                "item_reaver".into(),
+                "item_claymore".into(),
+                "item_lifesteal".into(),
+            ],
+        })),
+        "{:?}",
+        events[1]
     );
+    assert!(
+        events[1]
+            .iter()
+            .all(|event| !matches!(event.kind, MatchEventKind::ItemRemoved { .. })),
+        "componentes do Satanic não aparecem como itens que saíram: {:?}",
+        events[1]
+    );
+    assert!(
+        events[2].contains(&confirmed(MatchEventKind::MatchEnded {
+            result: MatchResult::Victory,
+        })),
+        "{:?}",
+        events[2]
+    );
+    assert_eq!(events[3], vec![]);
+    assert_eq!(events[4], vec![]);
 }
