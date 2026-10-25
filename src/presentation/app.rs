@@ -5,6 +5,7 @@ use relm4::{
     Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk,
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::{mpsc, watch};
 
@@ -29,26 +30,65 @@ pub struct CoreHandle {
 }
 
 /// O que a janela recebe do laço que acompanha o núcleo.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CoreUpdate {
-    Snapshot(Box<AppSnapshot>),
+    /// Há estado novo no canal; a janela lê o mais recente ao tratar o aviso.
+    Changed,
     /// O canal de estado fechou: o núcleo parou.
     Stopped,
 }
 
-/// Repassa cada novo estado e avisa uma única vez se o canal fechar. No
-/// encerramento normal este laço é descartado antes, junto com a janela, e o
-/// canal não chega a fechar; por isso `Stopped` sempre indica falha.
+/// Marca que já existe um aviso de estado novo esperando a janela. Enquanto
+/// ele não é tratado, as mudanças seguintes não geram outro aviso: a janela
+/// recebe no máximo um por vez e lê sempre o estado mais recente.
+#[derive(Debug, Default)]
+pub struct PendingUpdate(AtomicBool);
+
+impl PendingUpdate {
+    /// Marca o aviso. Devolve `true` só se não havia aviso pendente.
+    pub fn mark(&self) -> bool {
+        // `AcqRel`: a troca vê a liberação feita pela janela em `release`.
+        !self.0.swap(true, Ordering::AcqRel)
+    }
+
+    /// Libera o aviso. A janela chama antes de ler o estado, para que uma
+    /// mudança que chegue durante a leitura produza um novo aviso.
+    pub fn release(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// Libera o aviso e devolve o estado mais recente, se esta janela ainda não o
+/// leu. Um aviso pode chegar depois de a janela já ter lido a mudança que o
+/// gerou; nesse caso não há nada novo e nada é repassado às páginas.
+pub fn read_new_snapshot(
+    state: &mut watch::Receiver<AppSnapshot>,
+    pending: &PendingUpdate,
+) -> Option<AppSnapshot> {
+    pending.release();
+    // Leitura curta: o núcleo espera só durante a cópia do estado.
+    let snapshot = state.borrow_and_update();
+    snapshot.has_changed().then(|| snapshot.clone())
+}
+
+/// Avisa quando há estado novo, com no máximo um aviso pendente, e avisa uma
+/// única vez se o canal fechar. No encerramento normal este laço é descartado
+/// antes, junto com a janela, e o canal não chega a fechar; por isso `Stopped`
+/// sempre indica falha.
 pub async fn forward_snapshots(
     mut state: watch::Receiver<AppSnapshot>,
+    pending: Arc<PendingUpdate>,
     mut emit: impl FnMut(CoreUpdate),
 ) {
+    // O estado inicial também é avisado.
+    state.mark_changed();
     loop {
-        let snapshot = state.borrow_and_update().clone();
-        emit(CoreUpdate::Snapshot(Box::new(snapshot)));
         if state.changed().await.is_err() {
             emit(CoreUpdate::Stopped);
             return;
+        }
+        if pending.mark() {
+            emit(CoreUpdate::Changed);
         }
     }
 }
@@ -57,6 +97,9 @@ pub async fn forward_snapshots(
 pub struct App {
     hero: Controller<HeroPage>,
     diagnostics: Controller<DiagnosticsPage>,
+    /// Leitura do estado mais recente quando chega `CoreUpdate::Changed`.
+    state: watch::Receiver<AppSnapshot>,
+    pending: Arc<PendingUpdate>,
 }
 
 /// Widgets da janela atualizados a cada novo estado.
@@ -131,15 +174,27 @@ impl Component for App {
         toolbar.set_content(Some(&body));
         root.set_content(Some(&toolbar));
 
-        let state = core.state;
+        let state = core.state.clone();
+        // O estado inicial também é repassado às páginas no primeiro aviso.
+        let mut window_state = core.state;
+        window_state.mark_changed();
+        let pending = Arc::new(PendingUpdate::default());
+        let forward_pending = Arc::clone(&pending);
         sender.command(move |output, shutdown| {
             shutdown
-                .register(forward_snapshots(state, move |update| output.emit(update)))
+                .register(forward_snapshots(state, forward_pending, move |update| {
+                    output.emit(update)
+                }))
                 .drop_on_shutdown()
         });
 
         ComponentParts {
-            model: App { hero, diagnostics },
+            model: App {
+                hero,
+                diagnostics,
+                state: window_state,
+                pending,
+            },
             widgets: AppWidgets { connection },
         }
     }
@@ -152,7 +207,11 @@ impl Component for App {
         _root: &Self::Root,
     ) {
         match update {
-            CoreUpdate::Snapshot(snapshot) => {
+            CoreUpdate::Changed => {
+                let Some(snapshot) = read_new_snapshot(&mut self.state, &self.pending) else {
+                    return;
+                };
+                let snapshot = Box::new(snapshot);
                 widgets.connection.set_label(&connection_label(&snapshot));
                 self.hero
                     .emit(HeroMessage::Snapshot(Box::new((*snapshot).clone())));

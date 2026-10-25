@@ -62,7 +62,7 @@ Nos testes, os casos de uso recebem implementações falsas desses ports. Os tes
 1. O Dota envia um POST JSON para `http://127.0.0.1:<porta>/`.
 2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha. Um evento aceito do Dota leva também o estado de jogo normalizado (`gsi::normalize`); cada campo é lido isoladamente, e um bloco vazio (`{}`) significa "sem dado".
 3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual, a linha do tempo da partida e o resumo da última partida terminada, que fica disponível até a próxima partida ser encontrada.
-4. A interface recebe cada `AppSnapshot` e atualiza as telas.
+4. A interface lê o `AppSnapshot` mais recente e atualiza nas telas só as linhas que mudaram. Na aba Herói, eventos novos entram no topo da linha do tempo e os mais antigos saem de baixo, sem recriar as demais linhas.
 5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI ou marcar "Partida encontrada". O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
 
 O diagnóstico também roda automaticamente a cada 10 segundos. Os eventos de teste ficam separados dos eventos do Dota no estado, para que um teste bem-sucedido não seja exibido como conexão com o jogo, e não passam pelo `MatchTracker`.
@@ -73,7 +73,7 @@ O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fase
 
 - Cada camada tem erros tipados que guardam a causa original. Os que vão para o `AppSnapshot` guardam a causa em `Arc`, para o estado continuar `Clone`.
 - O domínio não conhece o contrato de diagnóstico. A `application` converte os erros dele, e cada erro específico implementa `ToDiagnostic` (`application::error`).
-- A interface converte o erro em `Diagnostic` no momento de exibir, com o `Redactor` do `AppSnapshot`, que remove o token. A mesma linha (`diagnostic_row`) mostra título, causa, resolução, código e detalhes técnicos.
+- A interface converte o erro em `Diagnostic` no momento de exibir, com o `Redactor` do `AppSnapshot`, que remove o token. A mesma linha (`RowContent::diagnostic`) mostra título, causa, resolução, código e detalhes técnicos.
 - Falhas que impedem a inicialização encerram o aplicativo com o mesmo diagnóstico no terminal, sem a cadeia completa do erro.
 - Antes de ler a configuração ou criar threads, o executável instala um hook de pânico em `infrastructure::logging`. Ele escreve diretamente em stderr uma mensagem fixa e o nome do arquivo, linha e coluna, sem payload, nome de thread ou backtrace. Não invoca o hook padrão nem altera a propagação do pânico.
 - O exemplo Rust `send_test_event`, chamado pelo script de teste manual, reutiliza a configuração e o cliente GSI da biblioteca. Envia um único evento marcado como teste, sem iniciar o servidor ou a interface.
@@ -83,7 +83,7 @@ O `MatchTracker` usa a ordem de chegada (o `clock_time` do Dota volta entre fase
 
 - `main.rs` cria um runtime tokio próprio. O servidor GSI e o laço do núcleo rodam nele.
 - A configuração global de idioma (`setlocale`) roda uma única vez na inicialização, antes do runtime Tokio e do GTK, sem outras threads consultando ou alterando o locale. Esse uso de `unsafe` foi aprovado pelo mantenedor.
-- A thread do GTK só executa a interface. Ela recebe o estado por `watch` dentro de um comando Relm4.
+- A thread do GTK só executa a interface. Um comando Relm4 acompanha o `watch` e avisa a janela quando há estado novo, com no máximo um aviso pendente; ao tratar o aviso, a janela lê o estado mais recente. Vários estados publicados antes de a janela tratar o aviso resultam em uma única atualização.
 - Operações de arquivo e de `/proc` rodam em `spawn_blocking`, e o teste de conexão roda em uma tarefa separada. A interface nunca espera por I/O.
 - Quando o log de eventos está ativo (`DOTA_COMPANION_GSI_LOG`), uma única tarefa grava os eventos do Dota um de cada vez, na ordem de chegada. Eventos de teste e requisições recusadas não são gravados.
 - O núcleo acompanha o fim de cada tarefa (diagnóstico, instalação, teste de conexão e gravação). Se uma delas entrar em pânico ou for cancelada, a interrupção aparece no `AppSnapshot` e no log, sem a mensagem do pânico.

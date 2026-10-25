@@ -6,6 +6,9 @@ use crate::domain::game::{AbilityState, GamePhase};
 use crate::domain::game::{CarriedItem, MatchId};
 use crate::domain::hero_catalog::AbilityInfo;
 use crate::domain::item_catalog::ItemInfo;
+use crate::domain::match_events::MatchEvent;
+use crate::presentation::widgets::{RowChange, RowContent, row_changes};
+use std::time::{Duration, UNIX_EPOCH};
 
 fn zeus_info() -> HeroInfo {
     HeroInfo {
@@ -438,4 +441,215 @@ fn slot_labels_cover_every_gsi_slot_kind() {
     assert_eq!(slot_label("stash3"), "Stash");
     assert_eq!(slot_label("teleport0"), "Espaço do TP");
     assert_eq!(slot_label("slot_novo"), "slot_novo");
+}
+
+fn in_progress_with_gold(gold: u32) -> MatchStatus {
+    MatchStatus {
+        game: Some(GameSnapshot {
+            phase: Some(GamePhase::InProgress),
+            hero_level: Some(17),
+            stats: PlayerStats {
+                gold: Some(gold),
+                ..summary().stats
+            },
+            inventory: Some(summary().final_items),
+            ..picked("npc_dota_hero_zuus", Some(22))
+        }),
+        timeline: vec![],
+        last_match: None,
+    }
+}
+
+fn content_of(status: &MatchStatus) -> HeroContent {
+    hero_content(status, None, &catalog(), &items())
+}
+
+fn row(level: Level, title: &str) -> RowContent {
+    RowContent::new(level, title, "Confirmado pelo GSI")
+}
+
+/// Evento de nível de habilidade; `level` diferencia os eventos entre si.
+fn leveled_entry(level: u32) -> TimelineEntry {
+    TimelineEntry {
+        at: UNIX_EPOCH + Duration::from_secs(u64::from(level)),
+        event: MatchEvent {
+            kind: MatchEventKind::AbilityLeveled {
+                ability: "zuus_arc_lightning".into(),
+                level,
+            },
+            provenance: Provenance::Confirmed,
+        },
+    }
+}
+
+fn entries(levels: std::ops::Range<u32>) -> Vec<TimelineEntry> {
+    levels.map(leveled_entry).collect()
+}
+
+#[test]
+fn only_the_changed_stat_row_is_updated_when_gold_changes() {
+    let before = content_of(&in_progress_with_gold(100));
+    let after = content_of(&in_progress_with_gold(250));
+
+    assert_eq!(
+        after.stats.last(),
+        Some(&row(Level::Info, "Ouro: 250")),
+        "{:?}",
+        after.stats
+    );
+    assert_eq!(
+        row_changes(&before.stats, &after.stats),
+        vec![RowChange::Update(after.stats.len() - 1)]
+    );
+    assert_eq!(row_changes(&before.hero, &after.hero), vec![]);
+    assert_eq!(row_changes(&before.items, &after.items), vec![]);
+    assert_eq!(row_changes(&before.abilities, &after.abilities), vec![]);
+    assert_eq!(before.title, after.title);
+}
+
+#[test]
+fn new_event_is_appended_without_rebuilding_the_timeline() {
+    let shown = entries(0..10);
+    let new = entries(0..11);
+    assert_eq!(
+        timeline_changes(&shown, &new),
+        TimelineChange {
+            dropped_oldest: 0,
+            appended: &[leveled_entry(10)],
+        }
+    );
+}
+
+#[test]
+fn oldest_event_leaves_when_the_timeline_exceeds_its_limit() {
+    let limit = crate::application::use_cases::track_match::TIMELINE_LIMIT as u32;
+    let shown = entries(0..limit);
+    let new = entries(1..limit + 1);
+
+    let change = timeline_changes(&shown, &new);
+
+    assert_eq!(change.dropped_oldest, 1);
+    assert_eq!(change.appended, &[leveled_entry(limit)]);
+    assert_eq!(
+        shown.len() - change.dropped_oldest + change.appended.len(),
+        limit as usize
+    );
+}
+
+#[test]
+fn new_match_replaces_every_timeline_row() {
+    let shown = entries(0..5);
+    let new = vec![TimelineEntry {
+        at: UNIX_EPOCH,
+        event: MatchEvent::manual_match_found(),
+    }];
+    assert_eq!(
+        timeline_changes(&shown, &new),
+        TimelineChange {
+            dropped_oldest: 5,
+            appended: &new,
+        }
+    );
+}
+
+#[test]
+fn empty_timeline_removes_every_shown_event() {
+    let shown = entries(0..3);
+    assert_eq!(
+        timeline_changes(&shown, &[]),
+        TimelineChange {
+            dropped_oldest: 3,
+            appended: &[],
+        }
+    );
+}
+
+#[test]
+fn unchanged_timeline_has_no_change() {
+    let shown = entries(0..4);
+    let change = timeline_changes(&shown, &shown);
+    assert!(change.is_empty(), "{change:?}");
+    assert!(timeline_changes(&[], &[]).is_empty());
+}
+
+#[test]
+fn snapshot_without_relevant_change_produces_no_row_change() {
+    let mut status = in_progress_with_gold(100);
+    status.timeline = entries(0..3);
+    let shown = content_of(&status);
+    // Um novo `AppSnapshot` com o mesmo estado da partida (por exemplo, só o
+    // diagnóstico mudou) gera o mesmo conteúdo.
+    let same = content_of(&status.clone());
+
+    assert_eq!(shown, same);
+    for (shown_rows, new_rows) in [
+        (&shown.hero, &same.hero),
+        (&shown.stats, &same.stats),
+        (&shown.items, &same.items),
+        (&shown.abilities, &same.abilities),
+    ] {
+        assert_eq!(row_changes(shown_rows, new_rows), vec![]);
+    }
+    assert!(timeline_changes(&status.timeline, &status.timeline).is_empty());
+}
+
+#[test]
+fn core_failure_is_the_first_hero_row() {
+    let failure = CoreConnectionError::StateClosed.to_diagnostic(&Redactor::default());
+    let content = hero_content(
+        &in_progress_with_gold(100),
+        Some(&failure),
+        &catalog(),
+        &items(),
+    );
+
+    assert_eq!(content.hero[0], RowContent::diagnostic(&failure));
+    assert_eq!(
+        content.hero[1],
+        RowContent::new(Level::Ok, "Zeus", "Herói confirmado pelo GSI",)
+    );
+}
+
+#[test]
+fn last_match_content_has_result_rows_before_the_hero() {
+    let status = MatchStatus {
+        game: Some(GameSnapshot::menu()),
+        timeline: vec![],
+        last_match: Some(summary()),
+    };
+    let content = content_of(&status);
+
+    assert_eq!(content.title, "Última partida");
+    assert_eq!(
+        content.hero[..4],
+        [
+            row(Level::Ok, "Resultado: vitória"),
+            row(Level::Ok, "Duração: 23:49"),
+            row(Level::Ok, "ID da partida: 9060449998"),
+            RowContent::new(Level::Ok, "Zeus", "Herói confirmado pelo GSI"),
+        ]
+    );
+}
+
+#[test]
+fn empty_state_shows_the_placeholder_rows() {
+    let content = content_of(&MatchStatus::default());
+
+    assert_eq!(content.title, "Herói escolhido");
+    assert_eq!(
+        content.stats,
+        vec![RowContent::new(
+            Level::Info,
+            "Sem estatísticas ainda",
+            "Os números aparecem quando o Dota os envia, a partir da seleção de heróis.",
+        )]
+    );
+    assert_eq!(
+        content.items,
+        vec![RowContent::new(
+            Level::Info,
+            "Sem itens para mostrar",
+            "O Dota envia os itens a partir do pré-jogo.",
+        )]
+    );
 }

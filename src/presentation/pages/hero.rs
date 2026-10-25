@@ -10,7 +10,7 @@ use relm4::adw::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::application::error::{Redactor, ToDiagnostic, log_error};
+use crate::application::error::{Diagnostic, Redactor, ToDiagnostic, log_error};
 use crate::application::event_bus::{CoreConnectionError, UiCommand};
 use crate::application::state::{AppSnapshot, MatchStatus, TimelineEntry};
 use crate::domain::game::{CarriedItem, GamePhase, GameSnapshot, HeroPick, PlayerStats};
@@ -21,7 +21,7 @@ use crate::domain::match_events::{
 };
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{
-    Level, boxed_list, diagnostic_row, format_time, section_title, status_row,
+    Level, RowContent, RowSection, boxed_list, format_time, section_title, status_row,
 };
 
 use super::send_command;
@@ -52,6 +52,31 @@ pub enum HeroView<'a> {
     LastMatch(&'a MatchSummary),
 }
 
+/// Conteúdo das seções da aba, exceto a linha do tempo, na ordem exibida.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroContent {
+    /// Título da seção do herói: "Herói escolhido" ou "Última partida".
+    pub title: String,
+    pub hero: Vec<RowContent>,
+    pub stats: Vec<RowContent>,
+    pub items: Vec<RowContent>,
+    pub abilities: Vec<RowContent>,
+}
+
+/// Alteração na linha do tempo: eventos mais antigos que saíram e eventos
+/// novos que entraram, do mais antigo ao mais recente.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimelineChange<'a> {
+    pub dropped_oldest: usize,
+    pub appended: &'a [TimelineEntry],
+}
+
+impl TimelineChange<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.dropped_oldest == 0 && self.appended.is_empty()
+    }
+}
+
 /// Página Herói.
 pub struct HeroPage {
     commands: UnboundedSender<UiCommand>,
@@ -78,14 +103,83 @@ pub struct HeroPageInit {
     pub items: Arc<ItemCatalog>,
 }
 
-/// Widgets reconstruídos a cada novo estado.
+/// Widgets da página, com o que cada lista mostra agora.
 pub struct HeroWidgets {
     hero_title: gtk::Label,
-    hero_list: gtk::ListBox,
-    stats_list: gtk::ListBox,
-    items_list: gtk::ListBox,
-    ability_list: gtk::ListBox,
-    timeline_list: gtk::ListBox,
+    hero: RowSection,
+    stats: RowSection,
+    items: RowSection,
+    abilities: RowSection,
+    timeline: TimelineSection,
+}
+
+/// Linha do tempo com o evento mais recente em cima. Eventos novos entram no
+/// topo e os mais antigos saem de baixo, sem recriar as outras linhas.
+struct TimelineSection {
+    list: gtk::ListBox,
+    /// Eventos exibidos, do mais antigo ao mais recente, como em `MatchStatus`.
+    entries: Vec<TimelineEntry>,
+    /// Linha e subtítulo exibido de cada evento, na mesma ordem de `entries`.
+    rows: Vec<(adw::ActionRow, String)>,
+    /// Linha "Nenhum evento da partida ainda", presente com a lista vazia.
+    placeholder: Option<adw::ActionRow>,
+}
+
+impl TimelineSection {
+    fn new(list: gtk::ListBox) -> Self {
+        TimelineSection {
+            list,
+            entries: Vec::new(),
+            rows: Vec::new(),
+            placeholder: None,
+        }
+    }
+
+    fn show(&mut self, timeline: &[TimelineEntry], catalog: &HeroCatalog, items: &ItemCatalog) {
+        let change = timeline_changes(&self.entries, timeline);
+        for (row, _) in self.rows.drain(..change.dropped_oldest) {
+            self.list.remove(&row);
+        }
+        // O subtítulo tem o tempo relativo ("há 5 s"), que muda sem novo evento.
+        for ((row, shown_subtitle), entry) in self.rows.iter_mut().zip(timeline) {
+            let subtitle = timeline_subtitle(entry);
+            if *shown_subtitle != subtitle {
+                row.set_subtitle(&subtitle);
+                *shown_subtitle = subtitle;
+            }
+        }
+        for entry in change.appended {
+            let subtitle = timeline_subtitle(entry);
+            let row = status_row(
+                Level::Info,
+                &event_label(&entry.event.kind, catalog, items),
+                &subtitle,
+            );
+            self.list.prepend(&row);
+            self.rows.push((row, subtitle));
+        }
+        if !change.is_empty() {
+            self.entries.drain(..change.dropped_oldest);
+            self.entries.extend_from_slice(change.appended);
+        }
+
+        match (&self.placeholder, timeline.is_empty()) {
+            (None, true) => {
+                let placeholder = status_row(
+                    Level::Info,
+                    &translate("Nenhum evento da partida ainda"),
+                    &translate("Os eventos aparecem quando o Dota envia dados de uma partida."),
+                );
+                self.list.append(&placeholder);
+                self.placeholder = Some(placeholder);
+            }
+            (Some(placeholder), false) => {
+                self.list.remove(placeholder);
+                self.placeholder = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Component for HeroPage {
@@ -142,7 +236,7 @@ impl Component for HeroPage {
         }
         content.append(&match_found_button);
 
-        let hero_title = section_title(&translate("Herói escolhido"));
+        let hero_title = section_title("");
         let hero_list = boxed_list();
         content.append(&hero_title);
         content.append(&hero_list);
@@ -177,15 +271,15 @@ impl Component for HeroPage {
             redactor: Redactor::default(),
             core_failure: None,
         };
-        let widgets = HeroWidgets {
+        let mut widgets = HeroWidgets {
             hero_title,
-            hero_list,
-            stats_list,
-            items_list,
-            ability_list,
-            timeline_list,
+            hero: RowSection::new(hero_list),
+            stats: RowSection::new(stats_list),
+            items: RowSection::new(items_list),
+            abilities: RowSection::new(ability_list),
+            timeline: TimelineSection::new(timeline_list),
         };
-        model.render(&widgets);
+        model.render(&mut widgets);
         ComponentParts { model, widgets }
     }
 
@@ -224,99 +318,129 @@ impl HeroPage {
         }
     }
 
-    fn render(&self, widgets: &HeroWidgets) {
-        let last_match_state;
-        let (game, last_match) = match hero_view(&self.match_status) {
-            HeroView::Current(game) => (game, None),
-            HeroView::LastMatch(summary) => {
-                last_match_state = last_match_snapshot(summary);
-                (Some(&last_match_state), Some(summary))
-            }
-        };
-        let hero = game.and_then(|game| picked_hero(game, &self.catalog));
+    /// Atualiza só as linhas que mudaram desde o último estado exibido.
+    fn render(&self, widgets: &mut HeroWidgets) {
+        let core_failure = self
+            .core_failure
+            .as_ref()
+            .map(|core_error| core_error.to_diagnostic(&self.redactor));
+        let content = hero_content(
+            &self.match_status,
+            core_failure.as_ref(),
+            &self.catalog,
+            &self.items,
+        );
+        if widgets.hero_title.label().as_str() != content.title {
+            widgets.hero_title.set_label(&content.title);
+        }
+        widgets.hero.show(content.hero);
+        widgets.stats.show(content.stats);
+        widgets.items.show(content.items);
+        widgets.abilities.show(content.abilities);
+        widgets
+            .timeline
+            .show(&self.match_status.timeline, &self.catalog, &self.items);
+    }
+}
 
-        widgets.hero_title.set_label(&if last_match.is_some() {
-            translate("Última partida")
-        } else {
-            translate("Herói escolhido")
-        });
-        widgets.hero_list.remove_all();
-        if let Some(core_failure) = &self.core_failure {
-            widgets
-                .hero_list
-                .append(&diagnostic_row(&core_failure.to_diagnostic(&self.redactor)));
+/// Conteúdo das seções para o estado da partida, com a falha de comunicação
+/// com o núcleo, quando existe, como primeira linha do herói.
+pub fn hero_content(
+    status: &MatchStatus,
+    core_failure: Option<&Diagnostic>,
+    catalog: &HeroCatalog,
+    items: &ItemCatalog,
+) -> HeroContent {
+    let last_match_state;
+    let (game, last_match) = match hero_view(status) {
+        HeroView::Current(game) => (game, None),
+        HeroView::LastMatch(summary) => {
+            last_match_state = last_match_snapshot(summary);
+            (Some(&last_match_state), Some(summary))
         }
-        for line in last_match.map(result_lines).unwrap_or_default() {
-            widgets.hero_list.append(&status_row(
-                Level::Ok,
-                &line,
-                &translate("Confirmado pelo GSI"),
-            ));
-        }
-        for row in hero_rows(game, hero) {
-            widgets.hero_list.append(&row);
-        }
+    };
+    let hero = game.and_then(|game| picked_hero(game, catalog));
+    let confirmed = translate("Confirmado pelo GSI");
 
-        widgets.stats_list.remove_all();
-        let stats = game.map(|game| stat_lines(&game.stats, game.hero_level));
-        match stats.filter(|lines| !lines.is_empty()) {
-            None => widgets.stats_list.append(&status_row(
-                Level::Info,
-                &translate("Sem estatísticas ainda"),
-                &translate(
-                    "Os números aparecem quando o Dota os envia, a partir da seleção de heróis.",
-                ),
-            )),
-            Some(lines) => {
-                for line in lines {
-                    widgets.stats_list.append(&status_row(
-                        Level::Info,
-                        &line,
-                        &translate("Confirmado pelo GSI"),
-                    ));
-                }
-            }
-        }
+    let title = if last_match.is_some() {
+        translate("Última partida")
+    } else {
+        translate("Herói escolhido")
+    };
 
-        widgets.items_list.remove_all();
-        match game.and_then(|game| game.inventory.as_deref()) {
-            None => widgets.items_list.append(&status_row(
-                Level::Info,
-                &translate("Sem itens para mostrar"),
-                &translate("O Dota envia os itens a partir do pré-jogo."),
-            )),
-            Some([]) => widgets.items_list.append(&status_row(
-                Level::Info,
-                &translate("Nenhum item"),
-                &translate("Confirmado pelo GSI"),
-            )),
-            Some(carried) => {
-                for (name, place) in item_lines(carried, &self.items) {
-                    widgets
-                        .items_list
-                        .append(&status_row(Level::Info, &name, &place));
-                }
-            }
-        }
+    let mut hero_section: Vec<RowContent> = core_failure
+        .map(RowContent::diagnostic)
+        .into_iter()
+        .collect();
+    hero_section.extend(
+        last_match
+            .map(result_lines)
+            .unwrap_or_default()
+            .iter()
+            .map(|line| RowContent::new(Level::Ok, line, &confirmed)),
+    );
+    hero_section.extend(hero_rows(game, hero));
 
-        widgets.ability_list.remove_all();
-        for row in ability_rows(game, hero) {
-            widgets.ability_list.append(&row);
-        }
+    let stats = match game
+        .map(|game| stat_lines(&game.stats, game.hero_level))
+        .filter(|lines| !lines.is_empty())
+    {
+        None => vec![RowContent::new(
+            Level::Info,
+            &translate("Sem estatísticas ainda"),
+            &translate(
+                "Os números aparecem quando o Dota os envia, a partir da seleção de heróis.",
+            ),
+        )],
+        Some(lines) => lines
+            .iter()
+            .map(|line| RowContent::new(Level::Info, line, &confirmed))
+            .collect(),
+    };
 
-        widgets.timeline_list.remove_all();
-        if self.match_status.timeline.is_empty() {
-            widgets.timeline_list.append(&status_row(
-                Level::Info,
-                &translate("Nenhum evento da partida ainda"),
-                &translate("Os eventos aparecem quando o Dota envia dados de uma partida."),
-            ));
-        }
-        for entry in self.match_status.timeline.iter().rev() {
-            widgets
-                .timeline_list
-                .append(&timeline_row(entry, &self.catalog, &self.items));
-        }
+    let item_rows = match game.and_then(|game| game.inventory.as_deref()) {
+        None => vec![RowContent::new(
+            Level::Info,
+            &translate("Sem itens para mostrar"),
+            &translate("O Dota envia os itens a partir do pré-jogo."),
+        )],
+        Some([]) => vec![RowContent::new(
+            Level::Info,
+            &translate("Nenhum item"),
+            &confirmed,
+        )],
+        Some(carried) => item_lines(carried, items)
+            .iter()
+            .map(|(name, place)| RowContent::new(Level::Info, name, place))
+            .collect(),
+    };
+
+    HeroContent {
+        title,
+        hero: hero_section,
+        stats,
+        items: item_rows,
+        abilities: ability_rows(game, hero),
+    }
+}
+
+/// Compara a linha do tempo exibida com a nova. A linha do tempo só ganha
+/// eventos no fim e perde os mais antigos (ou é reiniciada numa partida nova),
+/// então o fim da exibida que coincide com o começo da nova é mantido. Sem
+/// coincidência, todos os eventos saem e todos entram.
+pub fn timeline_changes<'a>(
+    shown: &[TimelineEntry],
+    new: &'a [TimelineEntry],
+) -> TimelineChange<'a> {
+    // Com todos os exibidos removidos, o trecho mantido é vazio e sempre
+    // coincide; por isso a busca sempre encontra um valor.
+    let dropped_oldest = (0..=shown.len())
+        .find(|&dropped| new.starts_with(&shown[dropped..]))
+        .unwrap_or(shown.len());
+    let kept = shown.len() - dropped_oldest;
+    TimelineChange {
+        dropped_oldest,
+        appended: &new[kept..],
     }
 }
 
@@ -449,16 +573,16 @@ pub fn picked_hero<'a>(game: &GameSnapshot, catalog: &'a HeroCatalog) -> Option<
         .or_else(|| id.and_then(|id| catalog.by_id(id)))
 }
 
-fn hero_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<adw::ActionRow> {
+fn hero_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<RowContent> {
     let Some(HeroPick::Picked { name, .. }) = game.map(|game| &game.hero) else {
-        return vec![status_row(
+        return vec![RowContent::new(
             Level::Info,
             &translate("Nenhum herói escolhido ainda"),
             &translate("O herói aparece quando o Dota informa a escolha."),
         )];
     };
     let Some(hero) = hero else {
-        return vec![status_row(
+        return vec![RowContent::new(
             Level::Warning,
             &translate_with("Herói sem dados embutidos: {}", &[name]),
             &translate("Confirmado pelo GSI; os dados embutidos não têm este herói."),
@@ -467,22 +591,22 @@ fn hero_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<adw::A
     let embedded_source = translate("Dados embutidos (dotaconstants)");
     let roles: Vec<String> = hero.roles.iter().map(role_label).collect();
     vec![
-        status_row(
+        RowContent::new(
             Level::Ok,
             &hero.display_name,
             &translate("Herói confirmado pelo GSI"),
         ),
-        status_row(
+        RowContent::new(
             Level::Info,
             &translate_with("Atributo: {}", &[&attribute_label(&hero.primary_attribute)]),
             &embedded_source,
         ),
-        status_row(
+        RowContent::new(
             Level::Info,
             &translate_with("Ataque: {}", &[&attack_label(&hero.attack_type)]),
             &embedded_source,
         ),
-        status_row(
+        RowContent::new(
             Level::Info,
             &translate_with("Funções: {}", &[&roles.join(", ")]),
             &embedded_source,
@@ -490,9 +614,9 @@ fn hero_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<adw::A
     ]
 }
 
-fn ability_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<adw::ActionRow> {
+fn ability_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<RowContent> {
     let Some((source, abilities)) = ability_lines(game, hero) else {
-        return vec![status_row(
+        return vec![RowContent::new(
             Level::Info,
             &translate("Sem habilidades para mostrar"),
             &translate("Escolha um herói ou aguarde o pré-jogo."),
@@ -517,7 +641,7 @@ fn ability_rows(game: Option<&GameSnapshot>, hero: Option<&HeroInfo>) -> Vec<adw
                 }
                 (None, _) => ability.name.clone(),
             };
-            status_row(Level::Info, &title, &source_label)
+            RowContent::new(Level::Info, &title, &source_label)
         })
         .collect()
 }
@@ -555,19 +679,12 @@ pub fn ability_lines(
     Some((AbilitySource::Embedded, lines))
 }
 
-fn timeline_row(
-    entry: &TimelineEntry,
-    catalog: &HeroCatalog,
-    items: &ItemCatalog,
-) -> adw::ActionRow {
-    status_row(
-        Level::Info,
-        &event_label(&entry.event.kind, catalog, items),
-        &format!(
-            "{} · {}",
-            provenance_label(entry.event.provenance),
-            format_time(entry.at)
-        ),
+/// Origem e horário de um evento, como aparece abaixo do texto dele.
+fn timeline_subtitle(entry: &TimelineEntry) -> String {
+    format!(
+        "{} · {}",
+        provenance_label(entry.event.provenance),
+        format_time(entry.at)
     )
 }
 

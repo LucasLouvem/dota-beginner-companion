@@ -10,12 +10,135 @@ use crate::application::error::Diagnostic;
 use super::i18n::{translate, translate_text, translate_with};
 
 /// Gravidade de uma linha de status.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     Ok,
     Warning,
     Error,
     Info,
+}
+
+/// Conteúdo de uma linha de status, para comparar o que já está na tela com
+/// o novo estado antes de mexer nos widgets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowContent {
+    pub level: Level,
+    pub title: String,
+    pub subtitle: String,
+}
+
+impl RowContent {
+    pub fn new(level: Level, title: &str, subtitle: &str) -> Self {
+        RowContent {
+            level,
+            title: title.to_owned(),
+            subtitle: subtitle.to_owned(),
+        }
+    }
+
+    /// Linha de erro de um diagnóstico: título, causa e resolução, código e
+    /// detalhes técnicos, todos selecionáveis para copiar.
+    pub fn diagnostic(diagnostic: &Diagnostic) -> Self {
+        RowContent {
+            level: Level::Error,
+            title: translate_text(&diagnostic.title),
+            subtitle: diagnostic_subtitle(diagnostic),
+        }
+    }
+
+    /// Cria a linha de status com este conteúdo.
+    pub fn to_row(&self) -> adw::ActionRow {
+        status_row(self.level, &self.title, &self.subtitle)
+    }
+}
+
+/// Alteração em uma lista de linhas, pela posição da linha.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowChange {
+    /// Mesmo ícone; título ou subtítulo mudou.
+    Update(usize),
+    /// O nível mudou, e com ele o ícone: a linha é trocada por uma nova.
+    Replace(usize),
+    /// Linha nova no fim da lista.
+    Append(usize),
+    /// A lista fica só com as primeiras linhas, até esta quantidade.
+    Truncate(usize),
+}
+
+/// O que muda, posição por posição, para a lista passar de `shown` a `new`.
+/// Linhas iguais não geram alteração.
+pub fn row_changes(shown: &[RowContent], new: &[RowContent]) -> Vec<RowChange> {
+    let mut changes: Vec<RowChange> = shown
+        .iter()
+        .zip(new)
+        .enumerate()
+        .filter(|(_, (old_row, new_row))| old_row != new_row)
+        .map(|(index, (old_row, new_row))| {
+            if old_row.level == new_row.level {
+                RowChange::Update(index)
+            } else {
+                RowChange::Replace(index)
+            }
+        })
+        .collect();
+    changes.extend((shown.len()..new.len()).map(RowChange::Append));
+    if new.len() < shown.len() {
+        changes.push(RowChange::Truncate(new.len()));
+    }
+    changes
+}
+
+/// Lista de linhas de status que altera só as linhas que mudaram.
+pub struct RowSection {
+    list: gtk::ListBox,
+    /// Linhas na ordem da lista, uma para cada item de `shown`.
+    rows: Vec<adw::ActionRow>,
+    shown: Vec<RowContent>,
+}
+
+impl RowSection {
+    pub fn new(list: gtk::ListBox) -> Self {
+        RowSection {
+            list,
+            rows: Vec::new(),
+            shown: Vec::new(),
+        }
+    }
+
+    /// Mostra `content`, mexendo só nas linhas que mudaram.
+    pub fn show(&mut self, content: Vec<RowContent>) {
+        for change in row_changes(&self.shown, &content) {
+            match change {
+                RowChange::Update(index) => {
+                    let (row, old, new) = (&self.rows[index], &self.shown[index], &content[index]);
+                    if old.title != new.title {
+                        row.set_title(&new.title);
+                    }
+                    if old.subtitle != new.subtitle {
+                        row.set_subtitle(&new.subtitle);
+                    }
+                }
+                RowChange::Replace(index) => {
+                    let row = content[index].to_row();
+                    // A nova linha entra antes da antiga, que sai em seguida.
+                    self.list.insert(&row, index as i32);
+                    self.list.remove(&self.rows[index]);
+                    self.rows[index] = row;
+                }
+                RowChange::Append(index) => {
+                    let row = content[index].to_row();
+                    self.list.append(&row);
+                    self.rows.push(row);
+                }
+                RowChange::Truncate(len) => {
+                    for row in self.rows.drain(len..) {
+                        self.list.remove(&row);
+                    }
+                }
+            }
+        }
+        self.shown = content;
+    }
 }
 
 /// Linha de status com ícone, título e subtítulo selecionável (para copiar caminhos).
@@ -41,16 +164,6 @@ pub fn status_row(level: Level, title: &str, subtitle: &str) -> adw::ActionRow {
     image.set_tooltip_text(Some(&tooltip));
     row.add_prefix(&image);
     row
-}
-
-/// Linha de erro de um diagnóstico: título, causa e resolução, código e
-/// detalhes técnicos, todos selecionáveis para copiar.
-pub fn diagnostic_row(diagnostic: &Diagnostic) -> adw::ActionRow {
-    status_row(
-        Level::Error,
-        &translate_text(&diagnostic.title),
-        &diagnostic_subtitle(diagnostic),
-    )
 }
 
 /// Diagnóstico completo em texto, com o título na primeira linha, para o terminal.
