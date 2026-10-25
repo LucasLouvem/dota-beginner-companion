@@ -92,7 +92,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - O inventário é o estado atual, sem histórico completo de compras. Comparar eventos pode indicar alterações, sem garantir a causa de cada alteração.
 - O log não cobre `POST_GAME` nem `win_team`; o fim de partida foi capturado depois, na verificação da Fase 2.
 
-## Fase 2 — Normalizador, herói e storage -> Atual
+## Fase 2 — Normalizador, herói e storage ✓ Concluída
 
 **Depende de:** Fase 1
 
@@ -134,11 +134,25 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - O log continuou gravando mais três partidas completas (Dragon Knight, Axe e Dawnbreaker; 10.892 eventos no total). Nelas apareceu `DOTA_GAMERULES_STATE_WAIT_FOR_PLAYERS_TO_LOAD` antes da seleção de heróis, e o app aberto deixou de registrar partida encontrada, início e fim a partir da segunda partida. A detecção foi corrigida para considerar essa fase, com teste da sequência.
 - O primeiro evento de `POST_GAME` ainda traz o ID `"0"`; o ID real vem no evento seguinte. O resumo da última partida é refeito a cada evento do pós-jogo, com teste.
 - O log completo passado pelo normalizador, pelo `MatchTracker` com as receitas embutidas e pelo estado da partida (sem a interface) deu 4 partidas encontradas, iniciadas e terminadas, com os resultados do log, 19 montagens de itens, nenhum evento de TP, e a aba Herói no fim com a última partida (Dawnbreaker, derrota, 17:40, 2/7/0, 34/0, GPM 481, XPM 1350, nível 21 e o ID da partida).
+- A interface passou a coalescer os estados (no máximo um aviso pendente para a thread do GTK) e a atualizar só as linhas que mudaram nas abas Herói e Diagnóstico. Com 3.000 eventos reenviados a 5 ms por evento, em build de depuração:
+  - a atualização da aba Herói caiu de 14,2 ms para 0,34 ms (mediana);
+  - a fila de estados, que antes levava cerca de 8 s para esvaziar depois do reenvio, deixou de se acumular;
+  - a thread do GTK caiu de 99% para 78% de um núcleo; o restante é layout e desenho do GTK.
+- Leitura pela acessibilidade (AT-SPI), depois do reenvio do log completo com essas mudanças:
+  - a aba Herói mostrou a última partida (Dawnbreaker, derrota, 17:40, 2/7/0, GPM 481, XPM 1350, nível 21) e a linha do tempo em ordem, com o evento mais recente em cima;
+  - a aba Diagnóstico mostrou 3.000 eventos recebidos e gravados;
+  - o botão "Testar conexão" acrescentou a linha de sucesso sem alterar a contagem de eventos do Dota.
+- Diagnósticos concorrentes (automático, manual e o feito depois da instalação) passaram a ser rodadas numeradas numa só sequência, e só a mais recente publica. Antes, uma rodada que lia os arquivos antes da instalação e terminava depois dela substituía o diagnóstico novo pelo antigo. Testes determinísticos do núcleo cobrem:
+  - diagnóstico antigo terminando depois da instalação;
+  - interrupção antiga;
+  - instalação ultrapassada por uma rodada mais nova;
+  - limpeza da interrupção pela rodada seguinte.
+- O teste de integração da instalação, que falhava de forma intermitente por essa corrida (6 falhas em 400 execuções paralelas com a máquina carregada), passou a esperar o primeiro diagnóstico e não falhou em 400 execuções nas mesmas condições.
 
 **Em aberto:**
 
 - Fonte verificável para posição (1 a 5) e dificuldade dos heróis.
-- Com eventos chegando muito mais rápido que no jogo (reenvio do log a 1 ms ou 25 ms por evento), a interface passa de 80% de CPU e deixa de responder, porque redesenha as listas inteiras a cada estado. No jogo (cerca de 1,5 evento por segundo) ela acompanhou sem problema. Por isso a conferência visual da última partida depois das mudanças desta fase não foi concluída pela acessibilidade.
+- A conferência visual (captura de tela) da interface depois das mudanças de desempenho não foi feita, nem a conferência numa partida real com o jogo aberto. A interface foi conferida só pela leitura de acessibilidade com o log reenviado.
 - A última partida fica só em memória; ela se perde ao fechar o app até existir o histórico.
 
 ## Fase 3 — Providers e recomendações
@@ -222,3 +236,9 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fase 2 implementada na branch `feat/phase-2-game-state-hero-storage`: normalizador do GSI, eventos de partida com origem, linha do tempo, "Partida encontrada" manual, aba Herói com dados embutidos do dotaconstants, cache em SQLite e ferramenta de reenvio do log. Aguardando revisão do mantenedor antes de marcar a fase como concluída.
 - 2026-10-24 — Fase 2 mesclada na `master` e conferida numa partida real completa contra bots: linha do tempo, habilidades, inventário e fim de partida conferem com o log. Registrados o `matchid` real no `POST_GAME`, a decisão de manter o último herói e os dados da última partida na aba Herói, a tela de partida no Histórico e os pontos em aberto de nomes de itens e da linha do tempo.
 - 2026-10-24 — Pendências da Fase 2 implementadas: relógio e ID da partida no estado, catálogo de itens embutido, TP fora da linha do tempo, itens neutros, montagem de itens pela receita, resumo e última partida na aba Herói com estatísticas e itens, e fixture real de fim de partida. Corrigidos a detecção de partida após `WAIT_FOR_PLAYERS_TO_LOAD` e o ID que chega depois do primeiro `POST_GAME`. Registradas as decisões de configuração no `config.toml`, botão manual reiniciando a linha do tempo e TP fora da linha do tempo, e o desempenho da interface com eventos muito rápidos.
+- 2026-10-24 — Fechamento da Fase 2:
+  - interface com coalescência de estados e atualização incremental das abas Herói e Diagnóstico;
+  - diagnósticos concorrentes numerados numa só sequência, publicando só a rodada mais recente;
+  - teste intermitente de instalação corrigido.
+
+  Fase 2 concluída, com a conferência visual e em partida real registrada como pendente. A Fase 3 aguarda confirmação do mantenedor para ser marcada como atual.
