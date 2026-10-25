@@ -2,3 +2,4 @@
 //! `application::ports`; a rede roda sempre em tarefas Tokio.
 
 pub mod http_json;
+pub mod opendota;

@@ -2,9 +2,8 @@
 
 use super::*;
 use crate::application::ports::{StorageError, StorageFailureKind};
-use std::collections::HashMap;
+use crate::test_support::MemoryCache;
 use std::io;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
 
@@ -12,64 +11,6 @@ const TTL: Duration = Duration::from_secs(3600);
 
 fn at(seconds: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(seconds)
-}
-
-/// Cache em memória com o mesmo comportamento de validade do SQLite.
-#[derive(Default)]
-struct MemoryCache {
-    entries: Mutex<HashMap<String, (String, SystemTime)>>,
-}
-
-impl MemoryCache {
-    fn with(key: &str, value: &str, stored_at: SystemTime) -> Arc<Self> {
-        let cache = Self::default();
-        cache
-            .entries
-            .lock()
-            .unwrap()
-            .insert(key.into(), (value.into(), stored_at));
-        Arc::new(cache)
-    }
-
-    fn stored(&self, key: &str) -> Option<String> {
-        self.entries
-            .lock()
-            .unwrap()
-            .get(key)
-            .map(|(value, _)| value.clone())
-    }
-}
-
-impl CacheStore for MemoryCache {
-    fn put(&self, key: &str, value: &str, stored_at: SystemTime) -> Result<(), StorageError> {
-        self.entries
-            .lock()
-            .unwrap()
-            .insert(key.into(), (value.into(), stored_at));
-        Ok(())
-    }
-
-    fn get(
-        &self,
-        key: &str,
-        ttl: Duration,
-        now: SystemTime,
-    ) -> Result<Option<CachedValue>, StorageError> {
-        Ok(self
-            .entries
-            .lock()
-            .unwrap()
-            .get(key)
-            .map(|(value, stored_at)| CachedValue {
-                value: value.clone(),
-                stored_at: *stored_at,
-                freshness: Freshness::of(*stored_at, now, ttl),
-            }))
-    }
-
-    fn purge_older_than(&self, _cutoff: SystemTime) -> Result<usize, StorageError> {
-        Ok(0)
-    }
 }
 
 /// Cache cujo banco falha em toda operação.

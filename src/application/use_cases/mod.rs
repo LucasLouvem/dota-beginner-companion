@@ -1,6 +1,7 @@
 //! Casos de uso da aplicação, um por arquivo.
 
 pub mod call_budget;
+pub mod current_patch;
 pub mod fallback;
 pub mod install_gsi_config;
 pub mod recommendation_request;

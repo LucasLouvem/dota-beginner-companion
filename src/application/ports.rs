@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
+use crate::domain::patch::PatchCatalog;
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
 
@@ -412,6 +413,8 @@ pub enum ProviderError {
     UnexpectedStatus { path: String, status: u16 },
     #[error("a resposta do OpenDota passou de {limit} bytes ({path})")]
     BodyTooLarge { path: String, limit: usize },
+    #[error("a resposta do OpenDota não tem o formato esperado: {detail} ({path})")]
+    UnexpectedFormat { path: String, detail: &'static str },
     #[error("a resposta do OpenDota não é um JSON válido ({path})")]
     InvalidJson {
         path: String,
@@ -442,6 +445,7 @@ impl ToDiagnostic for ProviderError {
                 "Espere alguns minutos; o aplicativo tenta de novo nas próximas consultas.",
             ),
             ProviderError::UnexpectedStatus { .. }
+            | ProviderError::UnexpectedFormat { .. }
             | ProviderError::BodyTooLarge { .. }
             | ProviderError::InvalidJson { .. } => (
                 DiagnosticCode::OpendotaBadResponse,
@@ -457,6 +461,36 @@ impl ToDiagnostic for ProviderError {
             technical_details: Some(technical_details(self, redactor)),
         }
     }
+}
+
+/// Consulta a uma fonte de estatísticas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatsQuery {
+    /// Lista de patches do jogo.
+    Patches,
+}
+
+impl StatsQuery {
+    /// Chave da resposta no cache local.
+    pub fn cache_key(&self) -> String {
+        match self {
+            StatsQuery::Patches => "stats/patches".into(),
+        }
+    }
+}
+
+/// Fonte de estatísticas do jogo (o OpenDota). `fetch` traz a resposta como
+/// texto JSON, que vai para o cache; os `decode_*` a convertem, para a
+/// aplicação não depender do formato da fonte.
+pub trait StatsProvider: Send + Sync {
+    fn fetch<'a>(
+        &'a self,
+        query: &'a StatsQuery,
+        category: CallCategory,
+    ) -> BoxFuture<'a, Result<String, ProviderError>>;
+
+    /// Patches a partir da resposta de `StatsQuery::Patches`.
+    fn decode_patches(&self, raw: &str) -> Result<PatchCatalog, ProviderError>;
 }
 
 #[cfg(test)]

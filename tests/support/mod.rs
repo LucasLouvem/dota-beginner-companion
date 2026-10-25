@@ -3,10 +3,12 @@
 
 mod gsi_fixtures;
 mod log_capture;
+mod memory_cache;
 mod memory_files;
 
 pub use gsi_fixtures::{
     DRAGON_KNIGHT_MATCH, DRAGON_KNIGHT_MATCH_END, ZEUS_MATCH, fixture_payloads,
 };
 pub use log_capture::{CapturedLogs, capture_logs};
+pub use memory_cache::MemoryCache;
 pub use memory_files::MemoryFiles;

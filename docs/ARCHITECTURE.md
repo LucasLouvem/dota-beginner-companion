@@ -45,15 +45,16 @@ Regras:
 
 ## Ports e adaptadores
 
-| Port (`application::ports`) | Adaptador                       | Função                                                                                           |
-| --------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `DotaLocator`               | `infrastructure::steam_locator` | Lista as bibliotecas Steam e as instalações do Dota 2                                            |
-| `ProcessProbe`              | `infrastructure::process`       | Informa se há processo `dota2` em `/proc/*/comm`                                                 |
-| `ConfigFiles`               | `infrastructure::config_files`  | Lê, grava (de forma atômica) e faz backup dos arquivos `.cfg`                                    |
-| `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                                                   |
-| `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)                                        |
-| `CacheStore`                | `storage::sqlite_cache`         | Grava e lê o cache local; valores vencidos voltam marcados como antigos                          |
-| `CallBudget`                | `storage::call_budget`          | Reserva cada chamada ao OpenDota no orçamento do aplicativo, por dia e por mês, de forma atômica |
+| Port (`application::ports`) | Adaptador                       | Função                                                                                                         |
+| --------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DotaLocator`               | `infrastructure::steam_locator` | Lista as bibliotecas Steam e as instalações do Dota 2                                                          |
+| `ProcessProbe`              | `infrastructure::process`       | Informa se há processo `dota2` em `/proc/*/comm`                                                               |
+| `ConfigFiles`               | `infrastructure::config_files`  | Lê, grava (de forma atômica) e faz backup dos arquivos `.cfg`                                                  |
+| `ConnectionTester`          | `gsi::client`                   | Envia um evento de teste ao servidor GSI local                                                                 |
+| `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)                                                      |
+| `CacheStore`                | `storage::sqlite_cache`         | Grava e lê o cache local; valores vencidos voltam marcados como antigos                                        |
+| `CallBudget`                | `storage::call_budget`          | Reserva cada chamada ao OpenDota no orçamento do aplicativo, por dia e por mês, de forma atômica               |
+| `StatsProvider`             | `providers::opendota`           | Busca dados do OpenDota como texto JSON (para o cache) e os decodifica campo a campo; hoje, a lista de patches |
 
 O orçamento de chamadas ao OpenDota é uma política conservadora do próprio aplicativo, não um limite oficial do OpenDota (`application::use_cases::call_budget`): por padrão, 1.000 chamadas por dia e 30.000 por mês, contadas em UTC. A coleta em segundo plano pode usar até 700 por dia e 21.000 por mês; as consultas das telas só param nos totais, então a coleta nunca ocupa as 300 chamadas diárias reservadas a elas. Cada reserva confere e incrementa os contadores numa transação `IMMEDIATE` do SQLite.
 

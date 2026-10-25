@@ -242,14 +242,14 @@ A abertura do banco (`storage::schema`) e o adaptador `storage::sqlite_cache` cl
 
 O cliente `providers::http_json` classifica a falha pela categoria que o reqwest informa e pelo status HTTP, sem ler mensagens. O caminho da consulta vai nos detalhes técnicos; nenhuma chave ou token.
 
-| Situação                                                                | Código                      | Ação para o usuário                                           |
-| ----------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------- |
-| Sem conexão com o OpenDota (rede ou DNS)                                | `OPENDOTA_UNREACHABLE`      | Verificar a internet; os dados guardados continuam aparecendo |
-| O OpenDota não respondeu dentro do tempo limite                         | `OPENDOTA_TIMED_OUT`        | Tentar de novo mais tarde                                     |
-| HTTP 429 também na última tentativa                                     | `OPENDOTA_RATE_LIMITED`     | Esperar alguns minutos                                        |
-| Status inesperado, resposta acima do limite de tamanho ou JSON inválido | `OPENDOTA_BAD_RESPONSE`     | Tentar de novo mais tarde; o formato da API pode ter mudado   |
-| Orçamento do aplicativo esgotado antes de uma tentativa                 | `OPENDOTA_BUDGET_EXHAUSTED` | Ver "Orçamento de chamadas ao OpenDota"                       |
-| O cliente HTTP não pôde ser criado                                      | `UNCLASSIFIED_ERROR`        | Consultar os detalhes técnicos                                |
+| Situação                                                                                                                           | Código                      | Ação para o usuário                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------- |
+| Sem conexão com o OpenDota (rede ou DNS)                                                                                           | `OPENDOTA_UNREACHABLE`      | Verificar a internet; os dados guardados continuam aparecendo |
+| O OpenDota não respondeu dentro do tempo limite                                                                                    | `OPENDOTA_TIMED_OUT`        | Tentar de novo mais tarde                                     |
+| HTTP 429 também na última tentativa                                                                                                | `OPENDOTA_RATE_LIMITED`     | Esperar alguns minutos                                        |
+| Status inesperado, resposta acima do limite de tamanho, JSON inválido ou sem o formato esperado (por exemplo, nenhum patch válido) | `OPENDOTA_BAD_RESPONSE`     | Tentar de novo mais tarde; o formato da API pode ter mudado   |
+| Orçamento do aplicativo esgotado antes de uma tentativa                                                                            | `OPENDOTA_BUDGET_EXHAUSTED` | Ver "Orçamento de chamadas ao OpenDota"                       |
+| O cliente HTTP não pôde ser criado                                                                                                 | `UNCLASSIFIED_ERROR`        | Consultar os detalhes técnicos                                |
 
 ### Dados dos heróis (`HeroDataError`)
 
