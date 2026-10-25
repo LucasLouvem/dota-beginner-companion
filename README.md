@@ -8,9 +8,11 @@ Feito para Arch Linux com KDE Plasma (Wayland), em Rust com GTK4 + Relm4.
 
 A aba **Herói** acompanha a partida pelo GSI:
 
-- mostra o herói escolhido com atributo, tipo de ataque e funções, a partir de dados embutidos do [dotaconstants](https://github.com/odota/dotaconstants) (sem rede);
+- mostra o herói escolhido com atributo, tipo de ataque e funções, a partir de dados embutidos do [dotaconstants](https://github.com/odota/dotaconstants) (sem rede), que também fornecem os nomes e as receitas dos itens;
+- mostra as estatísticas da partida (abates, mortes, assistências, last hits, denies, GPM, XPM, nível e ouro) e os itens carregados, com nomes de exibição;
 - lista as habilidades com o nível atual informado pelo GSI;
-- monta a linha do tempo da partida: partida encontrada, herói escolhido, início e fim da partida, níveis de habilidade, itens que entram ou saem do inventário e mortes;
+- monta a linha do tempo da partida: partida encontrada, herói escolhido, início e fim da partida, níveis de habilidade, itens que entram ou saem, itens neutros, itens montados a partir dos componentes e mortes (o TP fica de fora);
+- depois que a partida termina, mostra o resumo dela (resultado, duração, estatísticas, itens finais e o ID da partida, quando o Dota o envia) até a próxima partida ser encontrada;
 - indica a origem de cada informação: dado embutido, confirmado pelo GSI, inferido pelo aplicativo ou marcado por você;
 - tem o botão **Partida encontrada**, para marcar esse momento manualmente, já que o GSI não o informa.
 

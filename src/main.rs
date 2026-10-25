@@ -137,6 +137,7 @@ fn main() -> anyhow::Result<()> {
             commands: command_sender,
             state: state_receiver,
             heroes: Arc::new(heroes),
+            items,
         });
     runtime.shutdown_background();
     Ok(())

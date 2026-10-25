@@ -1,6 +1,8 @@
-//! Tela "Herói": herói do jogador com os dados embutidos, as habilidades que
-//! o GSI informa e a linha do tempo da partida. Cada informação diz de onde
-//! vem: dado embutido, confirmado pelo GSI, inferido ou marcado pelo usuário.
+//! Tela "Herói": herói do jogador com os dados embutidos, as estatísticas,
+//! os itens e as habilidades que o GSI informa e a linha do tempo da partida.
+//! Sem herói na partida atual, mostra a última partida terminada. Cada
+//! informação diz de onde vem: dado embutido, confirmado pelo GSI, inferido ou
+//! marcado pelo usuário.
 
 use std::sync::Arc;
 
@@ -11,9 +13,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::application::error::{Redactor, ToDiagnostic, log_error};
 use crate::application::event_bus::{CoreConnectionError, UiCommand};
 use crate::application::state::{AppSnapshot, MatchStatus, TimelineEntry};
-use crate::domain::game::{GameSnapshot, HeroPick};
+use crate::domain::game::{CarriedItem, GamePhase, GameSnapshot, HeroPick, PlayerStats};
 use crate::domain::hero_catalog::{AttackType, HeroCatalog, HeroInfo, HeroRole, PrimaryAttribute};
-use crate::domain::match_events::{ItemPlacement, MatchEventKind, MatchResult, Provenance};
+use crate::domain::item_catalog::ItemCatalog;
+use crate::domain::match_events::{
+    ItemPlacement, MatchEventKind, MatchResult, MatchSummary, Provenance,
+};
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{
     Level, boxed_list, diagnostic_row, format_time, section_title, status_row,
@@ -38,10 +43,20 @@ pub struct AbilityLine {
     pub ultimate: bool,
 }
 
+/// O que a aba mostra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeroView<'a> {
+    /// O estado da partida atual (ou nenhum, antes do primeiro evento).
+    Current(Option<&'a GameSnapshot>),
+    /// A última partida terminada, enquanto a partida atual não tem herói.
+    LastMatch(&'a MatchSummary),
+}
+
 /// Página Herói.
 pub struct HeroPage {
     commands: UnboundedSender<UiCommand>,
     catalog: Arc<HeroCatalog>,
+    items: Arc<ItemCatalog>,
     match_status: MatchStatus,
     redactor: Redactor,
     /// Falha de comunicação com o núcleo, mostrada na própria página.
@@ -60,11 +75,15 @@ pub enum HeroMessage {
 pub struct HeroPageInit {
     pub commands: UnboundedSender<UiCommand>,
     pub catalog: Arc<HeroCatalog>,
+    pub items: Arc<ItemCatalog>,
 }
 
 /// Widgets reconstruídos a cada novo estado.
 pub struct HeroWidgets {
+    hero_title: gtk::Label,
     hero_list: gtk::ListBox,
+    stats_list: gtk::ListBox,
+    items_list: gtk::ListBox,
     ability_list: gtk::ListBox,
     timeline_list: gtk::ListBox,
 }
@@ -99,8 +118,10 @@ impl Component for HeroPage {
         title.add_css_class("title-1");
         title.set_xalign(0.0);
         let intro = gtk::Label::new(Some(&translate(
-            "Mostra o herói escolhido, suas habilidades e o que aconteceu na partida. \
-             Funções vêm dos dados embutidos e não indicam a posição (1 a 5) na partida.",
+            "Mostra o herói escolhido, suas estatísticas, itens, habilidades e o que \
+             aconteceu na partida. Depois que a partida termina, mostra o resumo dela até a \
+             próxima ser encontrada. Funções vêm dos dados embutidos e não indicam a posição \
+             (1 a 5) na partida.",
         )));
         intro.set_wrap(true);
         intro.set_xalign(0.0);
@@ -121,9 +142,18 @@ impl Component for HeroPage {
         }
         content.append(&match_found_button);
 
+        let hero_title = section_title(&translate("Herói escolhido"));
         let hero_list = boxed_list();
-        content.append(&section_title(&translate("Herói escolhido")));
+        content.append(&hero_title);
         content.append(&hero_list);
+
+        let stats_list = boxed_list();
+        content.append(&section_title(&translate("Estatísticas")));
+        content.append(&stats_list);
+
+        let items_list = boxed_list();
+        content.append(&section_title(&translate("Itens")));
+        content.append(&items_list);
 
         let ability_list = boxed_list();
         content.append(&section_title(&translate("Habilidades")));
@@ -142,12 +172,16 @@ impl Component for HeroPage {
         let model = HeroPage {
             commands: init.commands,
             catalog: init.catalog,
+            items: init.items,
             match_status: MatchStatus::default(),
             redactor: Redactor::default(),
             core_failure: None,
         };
         let widgets = HeroWidgets {
+            hero_title,
             hero_list,
+            stats_list,
+            items_list,
             ability_list,
             timeline_list,
         };
@@ -191,17 +225,78 @@ impl HeroPage {
     }
 
     fn render(&self, widgets: &HeroWidgets) {
-        let game = self.match_status.game.as_ref();
+        let last_match_state;
+        let (game, last_match) = match hero_view(&self.match_status) {
+            HeroView::Current(game) => (game, None),
+            HeroView::LastMatch(summary) => {
+                last_match_state = last_match_snapshot(summary);
+                (Some(&last_match_state), Some(summary))
+            }
+        };
         let hero = game.and_then(|game| picked_hero(game, &self.catalog));
 
+        widgets.hero_title.set_label(&if last_match.is_some() {
+            translate("Última partida")
+        } else {
+            translate("Herói escolhido")
+        });
         widgets.hero_list.remove_all();
         if let Some(core_failure) = &self.core_failure {
             widgets
                 .hero_list
                 .append(&diagnostic_row(&core_failure.to_diagnostic(&self.redactor)));
         }
+        for line in last_match.map(result_lines).unwrap_or_default() {
+            widgets.hero_list.append(&status_row(
+                Level::Ok,
+                &line,
+                &translate("Confirmado pelo GSI"),
+            ));
+        }
         for row in hero_rows(game, hero) {
             widgets.hero_list.append(&row);
+        }
+
+        widgets.stats_list.remove_all();
+        let stats = game.map(|game| stat_lines(&game.stats, game.hero_level));
+        match stats.filter(|lines| !lines.is_empty()) {
+            None => widgets.stats_list.append(&status_row(
+                Level::Info,
+                &translate("Sem estatísticas ainda"),
+                &translate(
+                    "Os números aparecem quando o Dota os envia, a partir da seleção de heróis.",
+                ),
+            )),
+            Some(lines) => {
+                for line in lines {
+                    widgets.stats_list.append(&status_row(
+                        Level::Info,
+                        &line,
+                        &translate("Confirmado pelo GSI"),
+                    ));
+                }
+            }
+        }
+
+        widgets.items_list.remove_all();
+        match game.and_then(|game| game.inventory.as_deref()) {
+            None => widgets.items_list.append(&status_row(
+                Level::Info,
+                &translate("Sem itens para mostrar"),
+                &translate("O Dota envia os itens a partir do pré-jogo."),
+            )),
+            Some([]) => widgets.items_list.append(&status_row(
+                Level::Info,
+                &translate("Nenhum item"),
+                &translate("Confirmado pelo GSI"),
+            )),
+            Some(carried) => {
+                for (name, place) in item_lines(carried, &self.items) {
+                    widgets
+                        .items_list
+                        .append(&status_row(Level::Info, &name, &place));
+                }
+            }
         }
 
         widgets.ability_list.remove_all();
@@ -220,8 +315,127 @@ impl HeroPage {
         for entry in self.match_status.timeline.iter().rev() {
             widgets
                 .timeline_list
-                .append(&timeline_row(entry, &self.catalog));
+                .append(&timeline_row(entry, &self.catalog, &self.items));
         }
+    }
+}
+
+/// A partida atual quando ela tem herói escolhido; sem herói nela, a última
+/// partida terminada (que deixa de existir quando a próxima é encontrada).
+pub fn hero_view(status: &MatchStatus) -> HeroView<'_> {
+    let current = status.game.as_ref();
+    let current_has_hero = current.is_some_and(|game| matches!(game.hero, HeroPick::Picked { .. }));
+    match &status.last_match {
+        Some(summary) if !current_has_hero => HeroView::LastMatch(summary),
+        _ => HeroView::Current(current),
+    }
+}
+
+/// Estado equivalente ao fim da última partida, para exibir o resumo com as
+/// mesmas linhas de herói, estatísticas, itens e habilidades da partida atual.
+pub fn last_match_snapshot(summary: &MatchSummary) -> GameSnapshot {
+    GameSnapshot {
+        phase: Some(GamePhase::PostGame),
+        hero: summary.hero.clone(),
+        hero_level: summary.hero_level,
+        stats: summary.stats.clone(),
+        abilities: Some(summary.abilities.clone()),
+        inventory: Some(summary.final_items.clone()),
+        ..GameSnapshot::menu()
+    }
+}
+
+/// Resultado, duração e ID da partida terminada; linhas sem dado ficam de fora.
+pub fn result_lines(summary: &MatchSummary) -> Vec<String> {
+    let mut lines = vec![match summary.result {
+        MatchResult::Victory => translate("Resultado: vitória"),
+        MatchResult::Defeat => translate("Resultado: derrota"),
+        MatchResult::Unknown => translate("Resultado não informado pelo Dota"),
+    }];
+    if let Some(duration_secs) = summary.duration_secs {
+        lines.push(translate_with(
+            "Duração: {}",
+            &[&format_duration(duration_secs)],
+        ));
+    }
+    if let Some(match_id) = &summary.match_id {
+        lines.push(translate_with("ID da partida: {}", &[match_id.as_str()]));
+    }
+    lines
+}
+
+/// Duração no formato do relógio do Dota: `23:49` ou `1:02:03`.
+pub fn format_duration(total_secs: u32) -> String {
+    let (hours, minutes, seconds) = (total_secs / 3600, total_secs / 60 % 60, total_secs % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// Estatísticas do jogador; cada linha só aparece com todos os seus números.
+pub fn stat_lines(stats: &PlayerStats, hero_level: Option<u32>) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let (Some(kills), Some(deaths), Some(assists)) = (stats.kills, stats.deaths, stats.assists) {
+        lines.push(translate_with(
+            "Abates / mortes / assistências: {} / {} / {}",
+            &[
+                &kills.to_string(),
+                &deaths.to_string(),
+                &assists.to_string(),
+            ],
+        ));
+    }
+    if let (Some(last_hits), Some(denies)) = (stats.last_hits, stats.denies) {
+        lines.push(translate_with(
+            "Last hits / denies: {} / {}",
+            &[&last_hits.to_string(), &denies.to_string()],
+        ));
+    }
+    if let Some(gpm) = stats.gpm {
+        lines.push(translate_with(
+            "Ouro por minuto (GPM): {}",
+            &[&gpm.to_string()],
+        ));
+    }
+    if let Some(xpm) = stats.xpm {
+        lines.push(translate_with(
+            "Experiência por minuto (XPM): {}",
+            &[&xpm.to_string()],
+        ));
+    }
+    if let Some(level) = hero_level {
+        lines.push(translate_with("Nível: {}", &[&level.to_string()]));
+    }
+    if let Some(gold) = stats.gold {
+        lines.push(translate_with("Ouro: {}", &[&gold.to_string()]));
+    }
+    lines
+}
+
+/// Itens na ordem dos espaços, com o nome de exibição e o lugar onde estão.
+pub fn item_lines(items: &[CarriedItem], catalog: &ItemCatalog) -> Vec<(String, String)> {
+    items
+        .iter()
+        .map(|item| {
+            (
+                catalog.display_name(&item.name).to_owned(),
+                slot_label(&item.slot),
+            )
+        })
+        .collect()
+}
+
+/// Lugar de um espaço do inventário do GSI.
+pub fn slot_label(slot: &str) -> String {
+    match slot {
+        "slot0" | "slot1" | "slot2" | "slot3" | "slot4" | "slot5" => translate("Inventário"),
+        "slot6" | "slot7" | "slot8" => translate("Mochila"),
+        "teleport0" => translate("Espaço do TP"),
+        slot if slot.starts_with("stash") => translate("Stash"),
+        slot if slot.starts_with("neutral") => translate("Item neutro"),
+        other => other.to_owned(),
     }
 }
 
@@ -341,10 +555,14 @@ pub fn ability_lines(
     Some((AbilitySource::Embedded, lines))
 }
 
-fn timeline_row(entry: &TimelineEntry, catalog: &HeroCatalog) -> adw::ActionRow {
+fn timeline_row(
+    entry: &TimelineEntry,
+    catalog: &HeroCatalog,
+    items: &ItemCatalog,
+) -> adw::ActionRow {
     status_row(
         Level::Info,
-        &event_label(&entry.event.kind, catalog),
+        &event_label(&entry.event.kind, catalog, items),
         &format!(
             "{} · {}",
             provenance_label(entry.event.provenance),
@@ -353,8 +571,10 @@ fn timeline_row(entry: &TimelineEntry, catalog: &HeroCatalog) -> adw::ActionRow 
     )
 }
 
-/// Texto de um evento da partida.
-pub fn event_label(kind: &MatchEventKind, catalog: &HeroCatalog) -> String {
+/// Texto de um evento da partida, com os nomes de exibição de herói,
+/// habilidade e itens quando os catálogos os conhecem.
+pub fn event_label(kind: &MatchEventKind, catalog: &HeroCatalog, items: &ItemCatalog) -> String {
+    let item_name = |item: &str| items.display_name(item).to_owned();
     match kind {
         MatchEventKind::MatchFound => translate("Partida encontrada"),
         MatchEventKind::HeroPicked { hero } => {
@@ -372,21 +592,28 @@ pub fn event_label(kind: &MatchEventKind, catalog: &HeroCatalog) -> String {
         MatchEventKind::ItemAdded {
             item,
             placement: ItemPlacement::Carried,
-        } => translate_with("Item no inventário: {}", &[item]),
+        } => translate_with("Item no inventário: {}", &[&item_name(item)]),
         MatchEventKind::ItemAdded {
             item,
             placement: ItemPlacement::Neutral,
-        } => translate_with("Item neutro equipado: {}", &[item]),
+        } => translate_with("Item neutro equipado: {}", &[&item_name(item)]),
         MatchEventKind::ItemRemoved {
             item,
             placement: ItemPlacement::Carried,
-        } => translate_with("Item saiu do inventário: {}", &[item]),
+        } => translate_with("Item saiu do inventário: {}", &[&item_name(item)]),
         MatchEventKind::ItemRemoved {
             item,
             placement: ItemPlacement::Neutral,
-        } => translate_with("Item neutro removido: {}", &[item]),
+        } => translate_with("Item neutro removido: {}", &[&item_name(item)]),
         MatchEventKind::ItemAssembled { item, components } => {
-            translate_with("Item montado: {} ({})", &[item, &components.join(", ")])
+            let component_names: Vec<String> = components
+                .iter()
+                .map(|component| item_name(component))
+                .collect();
+            translate_with(
+                "Item montado: {} ({})",
+                &[&item_name(item), &component_names.join(", ")],
+            )
         }
         MatchEventKind::AbilityLeveled { ability, level } => {
             let name = catalog

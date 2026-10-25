@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, watch};
 use crate::application::event_bus::UiCommand;
 use crate::application::state::{AppSnapshot, ServerState};
 use crate::domain::hero_catalog::HeroCatalog;
+use crate::domain::item_catalog::ItemCatalog;
 
 use super::i18n::{translate, translate_with};
 use super::pages::{
@@ -24,6 +25,7 @@ pub struct CoreHandle {
     pub commands: mpsc::UnboundedSender<UiCommand>,
     pub state: watch::Receiver<AppSnapshot>,
     pub heroes: Arc<HeroCatalog>,
+    pub items: Arc<ItemCatalog>,
 }
 
 /// O que a janela recebe do laço que acompanha o núcleo.
@@ -89,6 +91,7 @@ impl Component for App {
             .launch(HeroPageInit {
                 commands: core.commands.clone(),
                 catalog: core.heroes,
+                items: core.items,
             })
             .detach();
         let diagnostics = DiagnosticsPage::builder()
