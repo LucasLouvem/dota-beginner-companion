@@ -1,7 +1,7 @@
 # Plano 001 — MVP do Dota Beginner Companion
 
 **Status:** Em andamento
-**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-24
+**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-25
 **Documentos relacionados:** [ARCHITECTURE](../docs/ARCHITECTURE.md) · [TESTING](../docs/TESTING.md) · [ERRORS](../docs/ERRORS.md) · [CODE_COMMENTS](../docs/CODE_COMMENTS.md) · [DOCUMENTATION](../docs/DOCUMENTATION.md) · [COMMITS](../docs/COMMITS.md)
 
 **Objetivo:** entregar um aplicativo desktop para Linux (Arch + KDE Plasma) que acompanha jogadores iniciantes de Dota 2 antes e depois da partida. Ele recebe o estado do jogo pelo GSI e mostra sugestões estatísticas de itens e habilidades a partir de dados públicos. O objetivo é ajudar quem está começando a entender as escolhas comuns, sem interferir no jogo.
@@ -159,7 +159,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 **Depende de:** Fase 2
 
-**Escopo:** integração com o OpenDota (constantes, patch, partidas profissionais recentes, detalhes de partidas), cache com fallback e cálculo de frequência de itens, momento médio de compra, taxa de vitória e ordem de habilidades. Abas Itens, Habilidades e Dados profissionais. Provider STRATZ opcional, ativo só com token configurado.
+**Escopo:** integração com o OpenDota (constantes, patch, partidas profissionais recentes, detalhes de partidas), cache com fallback e cálculo de frequência de itens, momento médio de compra, taxa de vitória e ordem de habilidades. Abas Itens, Habilidades e Dados profissionais. Provider STRATZ opcional, ativo só com token configurado. Inclui a escolha manual do modo de jogo, pré-requisito das recomendações.
 
 **Decisões tomadas:**
 
@@ -167,6 +167,8 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Recomendações abaixo da amostra mínima (padrão 10 partidas, configurável) aparecem como "amostra insuficiente", porque uma única partida não serve de base.
 - Toda recomendação mostra fonte, patch, data de atualização e quantidade de partidas, e é apresentada como sugestão estatística.
 - Chaves de API ficam em `.env` ou na configuração local, nunca no código.
+- O modo de jogo é escolhido pelo usuário, porque o GSI não o informa. Nas partidas de teste de 2026-10-25 (uma contra bots e uma turbo com matchmaking), nenhum campo indicou o modo; o `matchid` real chegou antes da seleção de heróis só na turbo, e o pré-jogo foi mais curto nela, mas são indícios de uma amostra e não decidem o modo. As recomendações precisam do modo para não misturar turbo com partidas normais, por isso a escolha entra nesta fase.
+- Ao encontrar a partida, o app pergunta o modo numa janela sobre ele mesmo, nunca sobre o jogo, com Escolha Livre, Turbo e Contra bots. A pré-seleção é o último modo confirmado na execução (Escolha Livre na primeira partida). Só "Confirmar" conta como escolha do usuário; fechar a pergunta vale o modo pré-selecionado como modo padrão. O modo pode ser alterado depois na aba Herói, sem reiniciar a partida, e fica só em memória.
 - A fase começa pela conferência numa partida real, com o jogo aberto, da interface depois das mudanças de desempenho da Fase 2 (leitura de acessibilidade e captura de tela), antes de implementar qualquer coisa nova. Na mesma partida, conferir o que o GSI envia sobre o tipo de partida (ver "Em aberto").
 
 **Resultados mínimos esperados:**
@@ -180,7 +182,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 - Os termos de uso da STRATZ permitem esse uso?
 - Como filtrar por posição quando a partida não informa a lane?
-- Tipo de partida (contra bots, normal, ranked, turbo): nos eventos gravados até agora, só de partidas contra bots, o bloco `map` não tem campo de modo de jogo nem de tipo de lobby, e o `customgamename` veio vazio. Conferir em partidas normais, ranked e turbo se o GSI envia algo diferente. Se não enviar, a fonte possível é o OpenDota pelo ID da partida, que só chega no `POST_GAME`; os campos dessa resposta precisam ser conferidos na documentação antes do uso. Isso afeta quais dados agregados servem de comparação (turbo tem ritmo de ouro e experiência diferente).
+- Guardar o último modo de jogo confirmado entre execuções do app, junto das configurações no SQLite.
 
 ## Fase 4 — Pós-partida, histórico, notificações e empacotamento
 
@@ -246,3 +248,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
   Fase 2 concluída, com a conferência visual e em partida real registrada como pendente. A Fase 3 aguarda confirmação do mantenedor para ser marcada como atual.
 - 2026-10-24 — Fase 3 marcada como atual, a pedido do mantenedor. Ela começa pela conferência no jogo pendente da Fase 2. O relógio da partida em cada evento da linha do tempo entra na Fase 4. O tipo de partida no GSI fica em aberto, para conferir em partidas que não sejam contra bots.
+- 2026-10-25 — Partidas de teste contra bots e turbo: o GSI não informa o modo de jogo. Decidida e incluída na Fase 3 a escolha manual do modo ao encontrar a partida, como pré-requisito das recomendações.
