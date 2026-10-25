@@ -5,6 +5,8 @@
 /// Fase da partida (`map.game_state` do GSI).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GamePhase {
+    /// Espera os jogadores carregarem; quando aparece, vem antes da seleção.
+    WaitForPlayersToLoad,
     HeroSelection,
     StrategyTime,
     TeamShowcase,
@@ -20,6 +22,7 @@ impl GamePhase {
     /// Converte o valor de `map.game_state` (ex.: `DOTA_GAMERULES_STATE_PRE_GAME`).
     pub fn from_gsi(game_state: &str) -> Self {
         match game_state {
+            "DOTA_GAMERULES_STATE_WAIT_FOR_PLAYERS_TO_LOAD" => GamePhase::WaitForPlayersToLoad,
             "DOTA_GAMERULES_STATE_HERO_SELECTION" => GamePhase::HeroSelection,
             "DOTA_GAMERULES_STATE_STRATEGY_TIME" => GamePhase::StrategyTime,
             "DOTA_GAMERULES_STATE_TEAM_SHOWCASE" => GamePhase::TeamShowcase,
@@ -35,13 +38,14 @@ impl GamePhase {
     /// que não fazem parte dela.
     pub fn sequence_position(&self) -> Option<u8> {
         match self {
-            GamePhase::HeroSelection => Some(0),
-            GamePhase::StrategyTime => Some(1),
-            GamePhase::TeamShowcase => Some(2),
-            GamePhase::WaitForMapToLoad => Some(3),
-            GamePhase::PreGame => Some(4),
-            GamePhase::InProgress => Some(5),
-            GamePhase::PostGame => Some(6),
+            GamePhase::WaitForPlayersToLoad => Some(0),
+            GamePhase::HeroSelection => Some(1),
+            GamePhase::StrategyTime => Some(2),
+            GamePhase::TeamShowcase => Some(3),
+            GamePhase::WaitForMapToLoad => Some(4),
+            GamePhase::PreGame => Some(5),
+            GamePhase::InProgress => Some(6),
+            GamePhase::PostGame => Some(7),
             GamePhase::Other(_) => None,
         }
     }

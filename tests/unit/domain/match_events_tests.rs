@@ -505,3 +505,51 @@ fn negative_clock_is_not_a_duration() {
     };
     assert_eq!(MatchSummary::from_post_game(&snapshot).duration_secs, None);
 }
+
+#[test]
+fn waiting_for_players_after_menu_is_an_inferred_match_found() {
+    let events = observe_all(vec![
+        GameSnapshot::menu(),
+        in_phase(GamePhase::WaitForPlayersToLoad),
+        in_phase(GamePhase::HeroSelection),
+    ]);
+    assert_eq!(
+        events,
+        vec![MatchEvent {
+            kind: MatchEventKind::MatchFound,
+            provenance: Provenance::Inferred,
+        }]
+    );
+}
+
+#[test]
+fn second_match_starting_with_wait_for_players_reports_start_and_end_again() {
+    let finished_match = |phases: &[GamePhase]| {
+        phases
+            .iter()
+            .map(|phase| in_phase(phase.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut snapshots = vec![GameSnapshot::menu()];
+    for _ in 0..2 {
+        snapshots.extend(finished_match(&[
+            GamePhase::WaitForPlayersToLoad,
+            GamePhase::HeroSelection,
+            GamePhase::PreGame,
+            GamePhase::InProgress,
+            GamePhase::PostGame,
+        ]));
+        snapshots.push(GameSnapshot::menu());
+    }
+
+    let events = kinds(&observe_all(snapshots));
+    let count = |expected: &MatchEventKind| events.iter().filter(|kind| *kind == expected).count();
+    assert_eq!(count(&MatchEventKind::MatchFound), 2);
+    assert_eq!(count(&MatchEventKind::MatchStarted), 2);
+    assert_eq!(
+        count(&MatchEventKind::MatchEnded {
+            result: MatchResult::Unknown
+        }),
+        2
+    );
+}

@@ -6,6 +6,10 @@ use super::*;
 fn converts_every_observed_game_state() {
     let cases = [
         (
+            "DOTA_GAMERULES_STATE_WAIT_FOR_PLAYERS_TO_LOAD",
+            GamePhase::WaitForPlayersToLoad,
+        ),
+        (
             "DOTA_GAMERULES_STATE_HERO_SELECTION",
             GamePhase::HeroSelection,
         ),

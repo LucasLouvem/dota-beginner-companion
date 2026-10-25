@@ -172,11 +172,15 @@ impl MatchTracker {
         events
     }
 
-    /// Uma partida nova começa na seleção de heróis vinda do menu, do fim de
-    /// outra partida ou do primeiro evento recebido. Voltar à seleção a partir
-    /// de uma fase posterior da mesma partida não conta.
+    /// Uma partida nova começa na primeira fase antes do jogo (espera dos
+    /// jogadores ou seleção de heróis) vinda do menu, do fim de outra partida
+    /// ou do primeiro evento recebido. Passar da espera para a seleção, ou
+    /// voltar à seleção a partir de uma fase posterior, não conta.
     fn is_new_match(&self, current: &GameSnapshot) -> bool {
-        if current.phase != Some(GamePhase::HeroSelection) {
+        if !matches!(
+            current.phase,
+            Some(GamePhase::WaitForPlayersToLoad | GamePhase::HeroSelection)
+        ) {
             return false;
         }
         match self.previous.as_ref().map(|previous| &previous.phase) {
