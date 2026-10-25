@@ -25,16 +25,16 @@ Os casos de uso acessam o sistema (Steam, processos, arquivos, HTTP) somente por
 
 ## Camadas
 
-| Módulo           | Responsabilidade                                                                                                        | Pode depender de        |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, eventos de partida e catálogo de heróis | nada do projeto         |
-| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso  | `domain`                |
-| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                               | `domain`, `application` |
-| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos dos heróis    | `domain`, `application` |
-| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                        | `domain`, `application` |
-| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                       | `domain`, `application` |
-| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                    | todos                   |
-| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                    | todos                   |
+| Módulo           | Responsabilidade                                                                                                                 | Pode depender de        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `domain`         | Regras puras: KeyValues/VDF, `.cfg` do GSI, instalação do Dota, estado de jogo, eventos de partida e catálogos de heróis e itens | nada do projeto         |
+| `application`    | Ports, mensagens, estado (`AppSnapshot`), relatório e contrato de diagnóstico (`error`), laço do núcleo e casos de uso           | `domain`                |
+| `gsi`            | Servidor GSI (Axum), normalização do JSON em estado de jogo e cliente do teste de conexão                                        | `domain`, `application` |
+| `infrastructure` | Adaptadores do sistema local: bibliotecas Steam, processos, arquivos GSI, `config.toml` e dados embutidos de heróis e itens      | `domain`, `application` |
+| `storage`        | Banco local SQLite (cache com prazo de validade)                                                                                 | `domain`, `application` |
+| `presentation`   | Interface GTK4/Relm4 e traduções; exibe o estado e envia comandos                                                                | `domain`, `application` |
+| `lib.rs`         | Declara as camadas como biblioteca, usada por `main.rs` e pelos testes de integração                                             | todos                   |
+| `main.rs`        | Composição: lê a configuração, cria os adaptadores, inicia o runtime e abre a janela                                             | todos                   |
 
 Regras:
 
@@ -53,7 +53,7 @@ Regras:
 | `GsiRecorder`               | `infrastructure::gsi_log_file`  | Grava os eventos do Dota em arquivo JSON Lines (opcional)               |
 | `CacheStore`                | `storage::sqlite_cache`         | Grava e lê o cache local; valores vencidos voltam marcados como antigos |
 
-O `CacheStore` ainda não é usado pelo núcleo: os dados que ele vai guardar vêm dos providers da Fase 3. Os dados dos heróis (`infrastructure::hero_data`) são um recorte do dotaconstants embutido no binário, com fonte e licença em `assets/dotaconstants/SOURCE.md`.
+O `CacheStore` ainda não é usado pelo núcleo: os dados que ele vai guardar vêm dos providers da Fase 3. Os dados dos heróis (`infrastructure::hero_data`) e dos itens (`infrastructure::item_data`) são recortes do dotaconstants embutidos no binário, com fonte e licença em `assets/dotaconstants/SOURCE.md`.
 
 Nos testes, os casos de uso recebem implementações falsas desses ports. Os testes unitários ficam em `tests/unit/` e os de integração em `tests/integration/`, conforme [TESTING.md](TESTING.md).
 
