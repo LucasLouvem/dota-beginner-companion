@@ -17,18 +17,26 @@ Para atualizar, gere o recorte a partir de um commit novo com o mesmo filtro e r
 
 ## Itens
 
-`items.json` é um recorte de `build/items.json`, do mesmo commit acima. Ele é a fonte dos nomes de exibição e das receitas dos itens.
+`items.json` é um recorte de `build/items.json`, do mesmo commit acima. Ele é a fonte dos nomes de exibição, dos custos e das receitas dos itens.
 
 - Só entram itens com `dname`. As receitas (`recipe_*`) e outros registros sem nome de exibição ficam de fora.
 - Campos por item:
   - `name`: a chave da fonte com o prefixo `item_`, que é o nome usado pelo GSI (ex.: `satanic` vira `item_satanic`);
   - `display_name`: o `dname`;
+  - `cost`: o custo em ouro, ou `null` quando a origem não o informa (alguns itens, como os tokens de neutros);
   - `components`: os componentes da receita, com o mesmo prefixo. Na origem, algumas receitas têm um componente vazio (`""`), que fica de fora.
 - Um item por linha, na ordem do `id` da origem.
 
 Comando usado para gerar o recorte a partir do arquivo de origem:
 
 ```sh
-jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .]}] | sort_by(.id) | .[] | del(.id)' items.json \
+jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, cost: .value.cost, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .]}] | sort_by(.id) | .[] | del(.id)' items.json \
   | awk 'BEGIN{print "["} NR>1{print prev","} {prev=$0} END{print prev; print "]"}' > assets/dotaconstants/items.json
 ```
+
+## IDs das habilidades e patches
+
+`ability_ids.json` e `patch.json` são cópias sem alteração de `build/ability_ids.json` e `build/patch.json`, do mesmo commit acima.
+
+- `ability_ids.json`: objeto com o ID da habilidade (em texto) como chave e o nome interno como valor. Uma chave pode ter mais de um ID separado por vírgula (`"3060,1617"`), com o mesmo nome. Traduz os IDs da ordem de habilidades das partidas do OpenDota.
+- `patch.json`: lista de patches com `name` (como `7.41`), `date` e `id`. O `id` é o valor do campo `patch` das partidas do OpenDota; o patch atual é o de maior `id`.

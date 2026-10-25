@@ -32,6 +32,7 @@ impl ToDiagnostic for ItemDataError {
 struct ItemRecord {
     name: String,
     display_name: String,
+    cost: Option<u32>,
     components: Vec<String>,
 }
 
@@ -48,6 +49,7 @@ fn parse_catalog(contents: &str) -> Result<ItemCatalog, ItemDataError> {
             .map(|record| ItemInfo {
                 name: record.name,
                 display_name: record.display_name,
+                cost: record.cost,
                 components: record.components,
             })
             .collect(),

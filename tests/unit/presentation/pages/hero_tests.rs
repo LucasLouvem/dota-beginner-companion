@@ -268,6 +268,7 @@ fn items() -> ItemCatalog {
     let item = |name: &str, display_name: &str| ItemInfo {
         name: name.into(),
         display_name: display_name.into(),
+        cost: None,
         components: vec![],
     };
     ItemCatalog::new(vec![

@@ -7,6 +7,7 @@ fn catalog() -> ItemCatalog {
         ItemInfo {
             name: "item_satanic".into(),
             display_name: "Satanic".into(),
+            cost: None,
             components: vec![
                 "item_reaver".into(),
                 "item_claymore".into(),
@@ -16,6 +17,7 @@ fn catalog() -> ItemCatalog {
         ItemInfo {
             name: "item_tango".into(),
             display_name: "Tango".into(),
+            cost: None,
             components: vec![],
         },
     ])
@@ -59,4 +61,41 @@ fn item_without_recipe_or_unknown_item_has_no_components() {
     let catalog = catalog();
     assert!(catalog.components("item_tango").is_empty());
     assert!(catalog.components("item_from_a_future_patch").is_empty());
+}
+
+fn priced(name: &str, cost: Option<u32>, components: &[&str]) -> ItemInfo {
+    ItemInfo {
+        name: name.into(),
+        display_name: name.into(),
+        cost,
+        components: components
+            .iter()
+            .map(|component| (*component).into())
+            .collect(),
+    }
+}
+
+fn priced_catalog() -> ItemCatalog {
+    ItemCatalog::new(vec![
+        priced("item_exact", Some(2000), &["item_a", "item_b"]),
+        priced("item_below", Some(1999), &["item_a", "item_b"]),
+        priced("item_no_recipe", Some(4000), &[]),
+        priced("item_no_cost", None, &["item_a"]),
+    ])
+}
+
+#[test]
+fn item_with_recipe_and_cost_of_at_least_2000_is_major() {
+    assert!(priced_catalog().is_major_item("item_exact"));
+    assert_eq!(priced_catalog().cost("item_exact"), Some(2000));
+}
+
+#[test]
+fn cheaper_item_item_without_recipe_or_cost_and_unknown_item_are_not_major() {
+    let catalog = priced_catalog();
+    assert!(!catalog.is_major_item("item_below"));
+    assert!(!catalog.is_major_item("item_no_recipe"));
+    assert!(!catalog.is_major_item("item_no_cost"));
+    assert!(!catalog.is_major_item("item_unknown"));
+    assert_eq!(catalog.cost("item_unknown"), None);
 }

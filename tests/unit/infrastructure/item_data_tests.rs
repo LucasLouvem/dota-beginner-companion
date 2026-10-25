@@ -60,3 +60,18 @@ fn fails_with_syntax_error_when_data_is_not_json() {
     let data_error = parse_catalog("not json").unwrap_err();
     assert_eq!(data_error.0.classify(), serde_json::error::Category::Syntax);
 }
+
+#[test]
+fn embedded_catalog_has_the_cost_of_the_source() {
+    let catalog = embedded_catalog().unwrap();
+    assert_eq!(catalog.cost("item_black_king_bar"), Some(4050));
+    assert_eq!(catalog.cost("item_tier1_token"), None);
+}
+
+#[test]
+fn embedded_black_king_bar_is_a_major_item_and_its_components_are_not() {
+    let catalog = embedded_catalog().unwrap();
+    assert!(catalog.is_major_item("item_black_king_bar"));
+    assert!(!catalog.is_major_item("item_ogre_axe"));
+    assert!(!catalog.is_major_item("item_mithril_hammer"));
+}

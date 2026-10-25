@@ -1,6 +1,6 @@
 # Erros
 
-**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-24
+**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-25
 
 Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicativo.
 
@@ -243,6 +243,19 @@ O adaptador `storage::sqlite_cache` classifica a falha pelo código que o SQLite
 | ----------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
 | O recorte embutido do dotaconstants não pode ser lido | `UNCLASSIFIED_ERROR` | Erro no log; os itens aparecem com o nome interno e montagens de itens não são reconhecidas |
 | Item que o recorte não tem                            | —                    | O item aparece com o nome interno enviado pelo GSI                                          |
+
+### IDs das habilidades (`AbilityIdDataError`)
+
+| Situação                                        | Código               | Diagnóstico                                                                   |
+| ----------------------------------------------- | -------------------- | ----------------------------------------------------------------------------- |
+| O recorte embutido não é JSON válido            | `UNCLASSIFIED_ERROR` | "Dados das habilidades indisponíveis": a ordem das habilidades fica sem nomes |
+| Uma chave do recorte tem um ID que não é número | `UNCLASSIFIED_ERROR` | O mesmo diagnóstico, com a chave inválida nos detalhes técnicos               |
+
+### Patches (`PatchDataError`)
+
+| Situação                             | Código               | Diagnóstico                                                                          |
+| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------ |
+| O recorte embutido não pode ser lido | `UNCLASSIFIED_ERROR` | "Dados dos patches indisponíveis": o patch atual só aparece com os dados do OpenDota |
 
 ### Reenvio do log GSI (`replay_gsi_log`)
 

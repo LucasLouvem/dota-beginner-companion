@@ -279,6 +279,7 @@ fn recipes() -> Arc<ItemCatalog> {
     let item = |name: &str, components: &[&str]| ItemInfo {
         name: name.into(),
         display_name: name.into(),
+        cost: None,
         components: components
             .iter()
             .map(|component| (*component).into())
