@@ -8,6 +8,8 @@ pub const MAJOR_ITEM_MIN_COST: u32 = 2000;
 /// Dados estáticos de um item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemInfo {
+    /// ID numérico da fonte, usado pelo OpenDota no inventário das partidas.
+    pub id: u32,
     /// Nome interno, como o GSI envia (`item_satanic`).
     pub name: String,
     /// Nome de exibição da fonte, em inglês.
@@ -33,6 +35,11 @@ impl ItemCatalog {
     /// Busca pelo nome interno.
     pub fn by_name(&self, name: &str) -> Option<&ItemInfo> {
         self.items.iter().find(|item| item.name == name)
+    }
+
+    /// Busca pelo ID numérico da fonte.
+    pub fn by_id(&self, id: u32) -> Option<&ItemInfo> {
+        self.items.iter().find(|item| item.id == id)
     }
 
     /// Nome de exibição; o nome interno quando o item não está no catálogo.

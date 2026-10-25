@@ -5,6 +5,7 @@ use super::*;
 fn catalog() -> ItemCatalog {
     ItemCatalog::new(vec![
         ItemInfo {
+            id: 0,
             name: "item_satanic".into(),
             display_name: "Satanic".into(),
             cost: None,
@@ -15,6 +16,7 @@ fn catalog() -> ItemCatalog {
             ],
         },
         ItemInfo {
+            id: 0,
             name: "item_tango".into(),
             display_name: "Tango".into(),
             cost: None,
@@ -65,6 +67,7 @@ fn item_without_recipe_or_unknown_item_has_no_components() {
 
 fn priced(name: &str, cost: Option<u32>, components: &[&str]) -> ItemInfo {
     ItemInfo {
+        id: 0,
         name: name.into(),
         display_name: name.into(),
         cost,

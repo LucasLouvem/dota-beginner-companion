@@ -21,6 +21,7 @@ Para atualizar, gere o recorte a partir de um commit novo com o mesmo filtro e r
 
 - Só entram itens com `dname`. As receitas (`recipe_*`) e outros registros sem nome de exibição ficam de fora.
 - Campos por item:
+  - `id`: o ID numérico da origem, usado pelo OpenDota no inventário e na popularidade de itens;
   - `name`: a chave da fonte com o prefixo `item_`, que é o nome usado pelo GSI (ex.: `satanic` vira `item_satanic`);
   - `display_name`: o `dname`;
   - `cost`: o custo em ouro, ou `null` quando a origem não o informa (alguns itens, como os tokens de neutros);
@@ -30,7 +31,7 @@ Para atualizar, gere o recorte a partir de um commit novo com o mesmo filtro e r
 Comando usado para gerar o recorte a partir do arquivo de origem:
 
 ```sh
-jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, cost: .value.cost, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .]}] | sort_by(.id) | .[] | del(.id)' items.json \
+jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, cost: .value.cost, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .]}] | sort_by(.id) | .[]' items.json \
   | awk 'BEGIN{print "["} NR>1{print prev","} {prev=$0} END{print prev; print "]"}' > assets/dotaconstants/items.json
 ```
 

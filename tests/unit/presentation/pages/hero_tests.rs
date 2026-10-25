@@ -266,6 +266,7 @@ fn assembled_item_event_lists_components_that_left() {
 
 fn items() -> ItemCatalog {
     let item = |name: &str, display_name: &str| ItemInfo {
+        id: 0,
         name: name.into(),
         display_name: display_name.into(),
         cost: None,

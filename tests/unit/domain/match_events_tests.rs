@@ -277,6 +277,7 @@ fn manual_match_found_is_marked_as_manual() {
 
 fn recipes() -> Arc<ItemCatalog> {
     let item = |name: &str, components: &[&str]| ItemInfo {
+        id: 0,
         name: name.into(),
         display_name: name.into(),
         cost: None,

@@ -75,3 +75,17 @@ fn embedded_black_king_bar_is_a_major_item_and_its_components_are_not() {
     assert!(!catalog.is_major_item("item_ogre_axe"));
     assert!(!catalog.is_major_item("item_mithril_hammer"));
 }
+
+#[test]
+fn embedded_catalog_finds_items_by_the_source_id() {
+    let catalog = embedded_catalog().unwrap();
+    assert_eq!(
+        catalog.by_id(110).map(|item| item.name.as_str()),
+        Some("item_refresher")
+    );
+    assert_eq!(
+        catalog.by_id(16).map(|item| item.name.as_str()),
+        Some("item_branches")
+    );
+    assert_eq!(catalog.by_id(0), None);
+}

@@ -30,6 +30,7 @@ impl ToDiagnostic for ItemDataError {
 
 #[derive(Deserialize)]
 struct ItemRecord {
+    id: u32,
     name: String,
     display_name: String,
     cost: Option<u32>,
@@ -47,6 +48,7 @@ fn parse_catalog(contents: &str) -> Result<ItemCatalog, ItemDataError> {
         records
             .into_iter()
             .map(|record| ItemInfo {
+                id: record.id,
                 name: record.name,
                 display_name: record.display_name,
                 cost: record.cost,

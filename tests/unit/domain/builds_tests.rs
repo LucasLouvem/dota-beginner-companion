@@ -7,6 +7,7 @@ use crate::domain::item_catalog::ItemInfo;
 /// Itens grandes (receita e custo ≥ 2000) e componentes, como no catálogo.
 fn catalog() -> ItemCatalog {
     let item = |name: &str, cost: u32, components: &[&str]| ItemInfo {
+        id: 0,
         name: name.into(),
         display_name: name.into(),
         cost: Some(cost),
