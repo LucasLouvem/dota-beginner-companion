@@ -27,6 +27,16 @@ fn config_path(library: &Path) -> std::path::PathBuf {
         .join(CONFIG_FILE_NAME)
 }
 
+/// Inicia o núcleo e espera o diagnóstico automático que roda ao iniciar.
+/// Sem essa espera, ele pode ler os arquivos antes da instalação e publicar
+/// depois dela, trocando o diagnóstico feito após a instalação por um antigo.
+async fn start_core(library: &Path) -> RunningCore {
+    let mut core = RunningCore::start(endpoint(), Some(library));
+    core.wait_for(|snapshot| snapshot.diagnostics.is_some())
+        .await;
+    core
+}
+
 async fn install(core: &mut RunningCore, library: &Path, overwrite: bool) -> AppSnapshot {
     let attempt = core.state.borrow().install_attempt;
     core.commands
@@ -43,7 +53,7 @@ async fn install(core: &mut RunningCore, library: &Path, overwrite: bool) -> App
 async fn install_creates_config_and_next_diagnostic_reports_it_as_matching() {
     let temp_dir = tempfile::tempdir().unwrap();
     let library = temp_dir.path();
-    let mut core = RunningCore::start(endpoint(), Some(library));
+    let mut core = start_core(library).await;
 
     let snapshot = install(&mut core, library, false).await;
 
@@ -71,7 +81,7 @@ async fn different_config_needs_confirmation_and_is_replaced_with_backup_after_i
     let path = config_path(library);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, "\"other\" { \"uri\" \"http://elsewhere\" }").unwrap();
-    let mut core = RunningCore::start(endpoint(), Some(library));
+    let mut core = start_core(library).await;
 
     let snapshot = install(&mut core, library, false).await;
     assert!(
@@ -110,7 +120,7 @@ async fn install_into_read_only_library_is_shown_as_permission_denied() {
         // Executando como root: permissões não se aplicam.
         return;
     }
-    let mut core = RunningCore::start(endpoint(), Some(library));
+    let mut core = start_core(library).await;
 
     let snapshot = install(&mut core, library, false).await;
     fs::set_permissions(library, fs::Permissions::from_mode(0o700)).unwrap();

@@ -2,6 +2,7 @@
 //! executa os casos de uso e publica o novo `AppSnapshot`.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, watch};
@@ -28,6 +29,40 @@ const DIAGNOSTICS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Evento do Dota a gravar no log: horário de chegada e JSON sem `auth`.
 type RecordedPayload = (SystemTime, Arc<str>);
+
+/// Numeração das rodadas de diagnóstico: automática, manual e a feita depois
+/// da instalação seguem a mesma sequência. As tarefas rodam em paralelo e
+/// podem terminar fora de ordem; só a rodada iniciada por último publica o
+/// resultado, para que um resultado antigo (inclusive uma interrupção) nunca
+/// apareça por cima de um mais novo.
+///
+/// O `Arc` permite que o laço do núcleo, que numera as rodadas, e as tarefas,
+/// que conferem a numeração ao publicar, compartilhem o mesmo contador.
+#[derive(Debug, Clone, Default)]
+struct DiagnosticsRounds(Arc<AtomicU64>);
+
+impl DiagnosticsRounds {
+    /// Inicia uma rodada e devolve o número dela.
+    fn start(&self) -> u64 {
+        // `AcqRel`/`Acquire`: quem confere em `is_latest` vê o número mais
+        // recente gravado aqui.
+        self.0.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    /// Indica se nenhuma rodada começou depois desta.
+    fn is_latest(&self, round: u64) -> bool {
+        self.0.load(Ordering::Acquire) == round
+    }
+}
+
+/// Registra que o resultado de uma rodada foi descartado por haver outra mais nova.
+fn log_discarded_round(operation: CoreOperation, round: u64) {
+    tracing::debug!(
+        ?operation,
+        round,
+        "discarded diagnostics result from an older round"
+    );
+}
 
 /// Adaptadores e configuração usados pelos casos de uso do núcleo.
 #[derive(Clone)]
@@ -58,6 +93,7 @@ pub async fn run(
         .clone()
         .map(|recorder| spawn_recorder(recorder, Arc::clone(&state)));
     let mut match_tracker = MatchTracker::new(Arc::clone(&dependencies.items));
+    let rounds = DiagnosticsRounds::default();
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
@@ -78,8 +114,10 @@ pub async fn run(
                     }
                 });
             }
-            Some(command) = commands.recv() => handle_command(&dependencies, &state, command),
-            _ = ticker.tick() => spawn_diagnostics(&dependencies, &state),
+            Some(command) = commands.recv() => {
+                handle_command(&dependencies, &state, &rounds, command);
+            }
+            _ = ticker.tick() => spawn_diagnostics(&dependencies, &state, &rounds),
         }
     }
 }
@@ -87,10 +125,11 @@ pub async fn run(
 fn handle_command(
     dependencies: &CoreDependencies,
     state: &Arc<watch::Sender<AppSnapshot>>,
+    rounds: &DiagnosticsRounds,
     command: UiCommand,
 ) {
     match command {
-        UiCommand::RunDiagnostics => spawn_diagnostics(dependencies, state),
+        UiCommand::RunDiagnostics => spawn_diagnostics(dependencies, state, rounds),
         UiCommand::MarkMatchFound => state.send_modify(|snapshot| {
             record_manual_match_found(&mut snapshot.match_status, SystemTime::now());
         }),
@@ -121,6 +160,8 @@ fn handle_command(
             overwrite,
         } => {
             let dependencies = dependencies.clone();
+            let rounds = rounds.clone();
+            let round = rounds.start();
             let task = tokio::task::spawn_blocking(move || {
                 let outcome = install_gsi_config(
                     dependencies.files.as_ref(),
@@ -134,12 +175,18 @@ fn handle_command(
                 task,
                 CoreOperation::InstallGsiConfig,
                 Arc::clone(state),
-                |snapshot, result| {
+                move |snapshot, result| {
                     match result {
                         Ok((outcome, report)) => {
                             snapshot.last_install = Some(outcome);
-                            snapshot.diagnostics = Some(report);
-                            snapshot.diagnostics_interrupted = None;
+                            // O resultado da instalação sempre é publicado;
+                            // o diagnóstico, só se nenhuma rodada começou depois.
+                            if rounds.is_latest(round) {
+                                snapshot.diagnostics = Some(report);
+                                snapshot.diagnostics_interrupted = None;
+                            } else {
+                                log_discarded_round(CoreOperation::InstallGsiConfig, round);
+                            }
                         }
                         Err(interrupted) => {
                             snapshot.last_install = Some(InstallOutcome::Interrupted(interrupted));
@@ -161,19 +208,34 @@ fn build_diagnostics(dependencies: &CoreDependencies) -> DiagnosticReport {
     )
 }
 
-fn spawn_diagnostics(dependencies: &CoreDependencies, state: &Arc<watch::Sender<AppSnapshot>>) {
+/// Inicia uma rodada de diagnóstico. O resultado, inclusive uma interrupção,
+/// só é publicado se nenhuma rodada começou depois desta.
+fn spawn_diagnostics(
+    dependencies: &CoreDependencies,
+    state: &Arc<watch::Sender<AppSnapshot>>,
+    rounds: &DiagnosticsRounds,
+) {
     let dependencies = dependencies.clone();
+    let rounds = rounds.clone();
+    let round = rounds.start();
     let task = tokio::task::spawn_blocking(move || build_diagnostics(&dependencies));
     publish_when_done(
         task,
         CoreOperation::Diagnostics,
         Arc::clone(state),
-        |snapshot, result| match result {
-            Ok(report) => {
-                snapshot.diagnostics = Some(report);
-                snapshot.diagnostics_interrupted = None;
+        move |snapshot, result| {
+            // A conferência roda dentro de `send_modify`, junto com a gravação.
+            if !rounds.is_latest(round) {
+                log_discarded_round(CoreOperation::Diagnostics, round);
+                return;
             }
-            Err(interrupted) => snapshot.diagnostics_interrupted = Some(interrupted),
+            match result {
+                Ok(report) => {
+                    snapshot.diagnostics = Some(report);
+                    snapshot.diagnostics_interrupted = None;
+                }
+                Err(interrupted) => snapshot.diagnostics_interrupted = Some(interrupted),
+            }
         },
     );
 }

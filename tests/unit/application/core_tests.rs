@@ -6,10 +6,11 @@ use crate::application::ports::{BoxFuture, ConnectionTestError, GsiRecordError, 
 use crate::application::state::GsiLogStatus;
 use crate::domain::game::{GamePhase, GameSnapshot};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, Provenance};
-use crate::test_support::{MemoryFiles, capture_logs};
+use crate::test_support::{CapturedLogs, MemoryFiles, capture_logs};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 /// Tempo máximo de espera por uma mudança de estado.
 const STATE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -434,4 +435,245 @@ fn sending_without_recorder_does_nothing() {
     send_to_recorder(&mut sender, (SystemTime::now(), "{}".into()), &state_sender);
 
     assert!(state.borrow().gsi_log.as_ref().unwrap().stopped.is_none());
+}
+
+/// Localizador que identifica cada chamada, em ordem, por
+/// `searched_libraries = ["/rodada-<n>"]`. A chamada `gated_call` avisa que
+/// começou e só termina quando o teste a libera; com `panics_after_release`,
+/// ela entra em pânico depois de liberada.
+struct GatedLocator {
+    calls: AtomicUsize,
+    gated_call: usize,
+    panics_after_release: bool,
+    started: mpsc::UnboundedSender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+/// Controle da chamada presa do `GatedLocator`.
+struct Gate {
+    started: mpsc::UnboundedReceiver<()>,
+    release: std::sync::mpsc::Sender<()>,
+}
+
+impl Gate {
+    async fn wait_started(&mut self) {
+        tokio::time::timeout(STATE_TIMEOUT, self.started.recv())
+            .await
+            .expect("a chamada presa deve começar a tempo")
+            .expect("o localizador continua existindo");
+    }
+
+    fn release(&self) {
+        self.release.send(()).unwrap();
+    }
+}
+
+fn gated_locator(gated_call: usize, panics_after_release: bool) -> (Arc<GatedLocator>, Gate) {
+    let (started_sender, started) = mpsc::unbounded_channel();
+    let (release, release_receiver) = std::sync::mpsc::channel();
+    let locator = GatedLocator {
+        calls: AtomicUsize::new(0),
+        gated_call,
+        panics_after_release,
+        started: started_sender,
+        release: Mutex::new(release_receiver),
+    };
+    (Arc::new(locator), Gate { started, release })
+}
+
+impl DotaLocator for GatedLocator {
+    fn locate(&self) -> LocatorResult {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if call == self.gated_call {
+            self.started.send(()).unwrap();
+            self.release
+                .lock()
+                .unwrap()
+                .recv()
+                .expect("o teste libera a chamada presa");
+            assert!(!self.panics_after_release, "rodada simulada falhou");
+        }
+        LocatorResult {
+            searched_libraries: vec![PathBuf::from(format!("/rodada-{call}"))],
+            installs: Vec::new(),
+        }
+    }
+}
+
+fn start_with_locator(locator: Arc<GatedLocator>) -> RunningCore {
+    start(
+        CoreDependencies {
+            locator,
+            ..dependencies()
+        },
+        AppSnapshot::default(),
+    )
+}
+
+/// Chamada do localizador que gerou o diagnóstico exibido.
+fn shown_round(snapshot: &AppSnapshot) -> Option<PathBuf> {
+    snapshot
+        .diagnostics
+        .as_ref()
+        .and_then(|report| report.searched_libraries.first().cloned())
+}
+
+fn round_path(call: usize) -> Option<PathBuf> {
+    Some(PathBuf::from(format!("/rodada-{call}")))
+}
+
+const DISCARDED_ROUND_LOG: &str = "discarded diagnostics result from an older round";
+
+/// Espera o descarte de uma rodada antiga, que não muda o estado e por isso
+/// só aparece no log.
+async fn wait_for_log(logs: &CapturedLogs, text: &str) {
+    tokio::time::timeout(STATE_TIMEOUT, async {
+        while !logs.text().contains(text) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("o log deve conter {text:?}: {}", logs.text()));
+}
+
+fn install_command() -> UiCommand {
+    UiCommand::InstallGsiConfig {
+        install_root: PathBuf::from("/lib"),
+        overwrite: false,
+    }
+}
+
+#[test]
+fn diagnostics_rounds_are_numbered_in_order_and_only_the_last_is_latest() {
+    let rounds = DiagnosticsRounds::default();
+    let first = rounds.start();
+    let second = rounds.start();
+
+    assert_eq!((first, second), (1, 2));
+    assert!(!rounds.is_latest(first));
+    assert!(rounds.is_latest(second));
+}
+
+#[tokio::test]
+async fn older_diagnostics_finishing_after_install_does_not_replace_install_diagnostics() {
+    let (_guard, logs) = capture_logs();
+    let (locator, mut gate) = gated_locator(1, false);
+    let mut core = start_with_locator(locator);
+
+    // 1. O diagnóstico automático (rodada 1) começa e fica preso.
+    gate.wait_started().await;
+
+    // 2. A instalação termina e publica o diagnóstico da rodada 2.
+    core.commands.send(install_command()).unwrap();
+    let snapshot = wait_for(&mut core.state, |snapshot| snapshot.install_attempt == 1).await;
+    assert!(
+        matches!(snapshot.last_install, Some(InstallOutcome::Created(_))),
+        "{:?}",
+        snapshot.last_install
+    );
+    assert_eq!(shown_round(&snapshot), round_path(2));
+
+    // 3. O diagnóstico antigo termina depois.
+    gate.release();
+    wait_for_log(&logs, DISCARDED_ROUND_LOG).await;
+
+    // 4. O diagnóstico novo permanece.
+    let snapshot = core.state.borrow().clone();
+    assert_eq!(shown_round(&snapshot), round_path(2));
+    assert!(snapshot.diagnostics_interrupted.is_none());
+    assert_eq!(snapshot.install_attempt, 1);
+}
+
+#[tokio::test]
+async fn older_interruption_does_not_overwrite_newer_report() {
+    let (_guard, logs) = capture_logs();
+    let (locator, mut gate) = gated_locator(1, true);
+    let mut core = start_with_locator(locator);
+    gate.wait_started().await;
+
+    core.commands.send(UiCommand::RunDiagnostics).unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        shown_round(snapshot) == round_path(2)
+    })
+    .await;
+
+    gate.release();
+    wait_for_log(&logs, DISCARDED_ROUND_LOG).await;
+
+    let snapshot = core.state.borrow().clone();
+    assert!(
+        snapshot.diagnostics_interrupted.is_none(),
+        "{:?}",
+        snapshot.diagnostics_interrupted
+    );
+    assert_eq!(shown_round(&snapshot), round_path(2));
+}
+
+#[tokio::test]
+async fn install_superseded_by_newer_round_keeps_newer_report_and_still_reports_install() {
+    let (_guard, logs) = capture_logs();
+    let (locator, mut gate) = gated_locator(2, false);
+    let mut core = start_with_locator(locator);
+    wait_for(&mut core.state, |snapshot| {
+        shown_round(snapshot) == round_path(1)
+    })
+    .await;
+
+    // A rodada da instalação (chamada 2) fica presa.
+    core.commands.send(install_command()).unwrap();
+    gate.wait_started().await;
+    // O diagnóstico manual começa depois e publica a chamada 3.
+    core.commands.send(UiCommand::RunDiagnostics).unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        shown_round(snapshot) == round_path(3)
+    })
+    .await;
+
+    gate.release();
+    let snapshot = wait_for(&mut core.state, |snapshot| snapshot.install_attempt == 1).await;
+
+    assert!(
+        matches!(snapshot.last_install, Some(InstallOutcome::Created(_))),
+        "{:?}",
+        snapshot.last_install
+    );
+    assert_eq!(shown_round(&snapshot), round_path(3));
+    assert!(logs.text().contains(DISCARDED_ROUND_LOG), "{}", logs.text());
+}
+
+#[tokio::test]
+async fn newer_round_replaces_report_of_an_older_round() {
+    let (locator, _gate) = gated_locator(0, false);
+    let mut core = start_with_locator(locator);
+    wait_for(&mut core.state, |snapshot| {
+        shown_round(snapshot) == round_path(1)
+    })
+    .await;
+
+    core.commands.send(UiCommand::RunDiagnostics).unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        shown_round(snapshot) == round_path(2)
+    })
+    .await;
+    assert!(snapshot.diagnostics_interrupted.is_none());
+}
+
+#[tokio::test]
+async fn install_round_clears_interruption_of_an_older_round() {
+    let (locator, mut gate) = gated_locator(1, true);
+    let mut core = start_with_locator(locator);
+    gate.wait_started().await;
+    gate.release();
+    let interrupted = wait_for(&mut core.state, |snapshot| {
+        snapshot.diagnostics_interrupted.is_some()
+    })
+    .await;
+    assert!(interrupted.diagnostics.is_none());
+
+    core.commands.send(install_command()).unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| snapshot.install_attempt == 1).await;
+    assert!(snapshot.diagnostics_interrupted.is_none());
+    assert_eq!(shown_round(&snapshot), round_path(2));
 }
