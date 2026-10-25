@@ -81,12 +81,14 @@ conforme [`docs/COMMITS.md`](docs/COMMITS.md).
    pendente ou merece atenção.
 7. **Acompanhe no GitHub.** Cada fase do plano é uma milestone e
    cada passo é uma issue em português, com os labels certos, no
-   quadro "Dota Beginner Companion" do GitHub Projects. Problema,
-   pendência ou decisão em aberto encontrado durante o trabalho
-   vira issue na milestone da fase; fase nova vira milestone. Ao
-   começar uma issue, mova-a para "In Progress"; ao concluir,
-   feche-a citando o commit e mova-a para "Done". O plano em
-   `plans/` continua sendo a fonte das decisões.
+   quadro "Dota Beginner Companion" do GitHub Projects. Todo
+   problema encontrado, feature nova, pendência ou decisão em
+   aberto vira issue antes de ser trabalhado. Para escolher a
+   milestone, verifique primeiro se alguma já existente cobre o
+   escopo; só crie uma nova se nenhuma couber. Ao começar uma
+   issue, mova-a para "In Progress"; ao concluir, feche-a citando
+   o commit e mova-a para "Done". O plano em `plans/` continua
+   sendo a fonte das decisões.
 
 ---
 
