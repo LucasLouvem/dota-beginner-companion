@@ -570,6 +570,71 @@ pub trait PublicBuildStore: Send + Sync {
     fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError>;
 }
 
+/// Falha ao obter a imagem de um item. Nunca impede o resto da página: o
+/// nome do item aparece no lugar.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ItemIconError {
+    #[error("não foi possível conectar ao CDN da Steam ({path})")]
+    Unreachable {
+        path: String,
+        #[source]
+        source: SharedError,
+    },
+    #[error("o CDN da Steam não respondeu a tempo ({path})")]
+    TimedOut {
+        path: String,
+        #[source]
+        source: SharedError,
+    },
+    #[error("o CDN da Steam respondeu com HTTP {status} ({path})")]
+    UnexpectedStatus { path: String, status: u16 },
+    #[error("a imagem do item passou de {limit} bytes ({path})")]
+    TooLarge { path: String, limit: usize },
+    #[error("o arquivo recebido não é uma imagem PNG ({path})")]
+    NotPng { path: String },
+    #[error("o caminho da imagem não é do CDN de itens do Dota ({path})")]
+    UnexpectedPath { path: String },
+    #[error("não foi possível ler ou gravar a imagem guardada em {}", path.display())]
+    Cache {
+        path: PathBuf,
+        #[source]
+        source: SharedError,
+    },
+}
+
+impl ToDiagnostic for ItemIconError {
+    fn to_diagnostic(&self, redactor: &Redactor) -> Diagnostic {
+        Diagnostic {
+            code: DiagnosticCode::ItemIconUnavailable,
+            title: UiText::new("Imagem do item indisponível"),
+            cause: UiText::new(match self {
+                ItemIconError::Cache { .. } => {
+                    "A imagem guardada no computador não pôde ser lida ou gravada."
+                }
+                _ => "A imagem do item não pôde ser baixada do CDN da Steam.",
+            }),
+            resolution: UiText::new(
+                "O nome do item aparece no lugar; o aplicativo tenta de novo na próxima abertura.",
+            ),
+            technical_details: Some(technical_details(self, redactor)),
+        }
+    }
+}
+
+/// Fonte das imagens dos itens.
+pub trait ItemIconSource: Send + Sync {
+    /// PNG do item pelo caminho da fonte de dados
+    /// (`/apps/dota2/images/dota_react/items/blink.png?t=…`).
+    fn fetch<'a>(&'a self, image_path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, ItemIconError>>;
+}
+
+/// Imagens dos itens guardadas no computador, pelo nome interno do item.
+pub trait ItemIconStore: Send + Sync {
+    /// PNG guardado; `None` quando ainda não foi baixado.
+    fn load(&self, item: &str) -> Result<Option<Vec<u8>>, ItemIconError>;
+    fn save(&self, item: &str, png: &[u8]) -> Result<(), ItemIconError>;
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/application/ports_tests.rs"]
 mod tests;

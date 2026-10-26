@@ -3,3 +3,4 @@
 
 pub mod http_json;
 pub mod opendota;
+pub mod steam_cdn;

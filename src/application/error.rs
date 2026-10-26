@@ -63,6 +63,9 @@ pub enum DiagnosticCode {
     OpendotaRateLimited,
     /// O OpenDota respondeu com status inesperado, corpo grande demais ou JSON inválido.
     OpendotaBadResponse,
+    /// A imagem de um item não pôde ser obtida nem lida do cache; o nome do
+    /// item aparece no lugar.
+    ItemIconUnavailable,
     /// Causa ainda não classificada; o diagnóstico traz os detalhes técnicos.
     Unclassified,
 }
@@ -96,6 +99,7 @@ impl DiagnosticCode {
         DiagnosticCode::OpendotaTimedOut,
         DiagnosticCode::OpendotaRateLimited,
         DiagnosticCode::OpendotaBadResponse,
+        DiagnosticCode::ItemIconUnavailable,
         DiagnosticCode::Unclassified,
     ];
 
@@ -130,6 +134,7 @@ impl DiagnosticCode {
             DiagnosticCode::OpendotaTimedOut => "OPENDOTA_TIMED_OUT",
             DiagnosticCode::OpendotaRateLimited => "OPENDOTA_RATE_LIMITED",
             DiagnosticCode::OpendotaBadResponse => "OPENDOTA_BAD_RESPONSE",
+            DiagnosticCode::ItemIconUnavailable => "ITEM_ICON_UNAVAILABLE",
             DiagnosticCode::Unclassified => "UNCLASSIFIED_ERROR",
         }
     }

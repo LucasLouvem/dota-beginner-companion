@@ -1,6 +1,6 @@
 # Erros
 
-**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-25
+**Criado em:** 2026-10-24 · **Atualizado em:** 2026-10-26
 
 Padrão para definir e exibir erros, e catálogo dos erros tratados pelo aplicativo.
 
@@ -252,6 +252,15 @@ O cliente `providers::http_json` classifica a falha pela categoria que o reqwest
 | Status inesperado, resposta acima do limite de tamanho, JSON inválido ou sem o formato esperado (por exemplo, nenhum patch válido) | `OPENDOTA_BAD_RESPONSE`     | Tentar de novo mais tarde; o formato da API pode ter mudado   |
 | Orçamento do aplicativo esgotado antes de uma tentativa                                                                            | `OPENDOTA_BUDGET_EXHAUSTED` | Ver "Orçamento de chamadas ao OpenDota"                       |
 | O cliente HTTP não pôde ser criado                                                                                                 | `UNCLASSIFIED_ERROR`        | Consultar os detalhes técnicos                                |
+
+### Imagens dos itens (`ItemIconError`)
+
+As imagens vêm do CDN da Steam (`providers::steam_cdn`) e ficam guardadas na pasta de cache do usuário (`infrastructure::item_icon_cache`). Uma falha nunca bloqueia a página: o item aparece pelo nome, a falha vai para o log com `log_warning` e a imagem é procurada de novo só na próxima abertura do aplicativo.
+
+| Situação                                                                                                                       | Código                  | Comportamento                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ------------------------------------------------------------- |
+| Sem conexão, tempo esgotado, status inesperado, imagem acima de 64 KB, arquivo que não é PNG ou caminho fora da pasta de itens | `ITEM_ICON_UNAVAILABLE` | O item aparece pelo nome; aviso no log                        |
+| Falha ao ler ou gravar a imagem guardada                                                                                       | `ITEM_ICON_UNAVAILABLE` | A imagem baixada aparece mesmo sem ser guardada; aviso no log |
 
 ### Dados dos heróis (`HeroDataError`)
 

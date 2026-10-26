@@ -5,6 +5,7 @@ pub mod current_patch;
 pub mod external_sources;
 pub mod fallback;
 pub mod install_gsi_config;
+pub mod item_icons;
 pub mod pro_builds;
 pub mod public_collection;
 pub mod recommendation_request;
