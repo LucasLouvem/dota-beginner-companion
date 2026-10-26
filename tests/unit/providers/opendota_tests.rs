@@ -302,3 +302,57 @@ fn public_matches_path_carries_the_cursor() {
         "/publicMatches"
     );
 }
+
+const ITEM_POPULARITY_RESPONSE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/opendota/heroes_22_item_popularity.json"
+));
+
+#[test]
+fn real_item_popularity_has_the_most_bought_item_first_in_each_phase() {
+    let popularity = decode_item_popularity(ITEM_POPULARITY_RESPONSE, &items()).unwrap();
+
+    let top: Vec<(PopularityPhase, &str, u32)> = popularity
+        .phases
+        .iter()
+        .map(|(phase, counts)| (*phase, counts[0].0.as_str(), counts[0].1))
+        .collect();
+    assert_eq!(
+        top,
+        [
+            (PopularityPhase::Start, "item_branches", 189),
+            (PopularityPhase::Early, "item_boots", 96),
+            (PopularityPhase::Mid, "item_staff_of_wizardry", 116),
+            (PopularityPhase::Late, "item_refresher", 49),
+        ]
+    );
+}
+
+#[test]
+fn unknown_item_ids_and_missing_phases_leave_nothing_behind() {
+    let popularity =
+        decode_item_popularity(r#"{"start_game_items": {"16": 3, "999999": 9}}"#, &items())
+            .unwrap();
+
+    assert_eq!(
+        popularity.phases,
+        vec![
+            (
+                PopularityPhase::Start,
+                vec![("item_branches".to_owned(), 3)]
+            ),
+            (PopularityPhase::Early, vec![]),
+            (PopularityPhase::Mid, vec![]),
+            (PopularityPhase::Late, vec![]),
+        ]
+    );
+}
+
+#[test]
+fn item_popularity_that_is_not_an_object_has_unexpected_format() {
+    let error = decode_item_popularity("[]", &items()).unwrap_err();
+    assert!(
+        matches!(error, ProviderError::UnexpectedFormat { .. }),
+        "{error:?}"
+    );
+}

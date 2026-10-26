@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use crate::domain::builds::MatchBuild;
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
-use crate::domain::match_data::{HeroMatch, MatchDetails, PublicMatchSummary};
+use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
 use crate::domain::patch::PatchCatalog;
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
@@ -478,6 +478,8 @@ pub enum StatsQuery {
     HeroMatches { hero_id: u32 },
     /// Detalhes de uma partida.
     MatchDetails { match_id: u64 },
+    /// Itens mais comprados pelo herói por fase, em partidas profissionais.
+    ItemPopularity { hero_id: u32 },
     /// Amostra de partidas públicas com ID menor que `less_than_match_id`
     /// (as mais recentes, sem ele). Cada resposta é diferente: não vai para
     /// o cache.
@@ -491,6 +493,9 @@ impl StatsQuery {
             StatsQuery::Patches => "stats/patches".into(),
             StatsQuery::HeroMatches { hero_id } => format!("stats/heroes/{hero_id}/matches"),
             StatsQuery::MatchDetails { match_id } => format!("stats/matches/{match_id}"),
+            StatsQuery::ItemPopularity { hero_id } => {
+                format!("stats/heroes/{hero_id}/item-popularity")
+            }
             StatsQuery::PublicMatches { less_than_match_id } => match less_than_match_id {
                 Some(match_id) => format!("stats/public-matches/{match_id}"),
                 None => "stats/public-matches".into(),
@@ -519,6 +524,9 @@ pub trait StatsProvider: Send + Sync {
 
     /// Detalhes a partir da resposta de `StatsQuery::MatchDetails`.
     fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError>;
+
+    /// Popularidade a partir da resposta de `StatsQuery::ItemPopularity`.
+    fn decode_item_popularity(&self, raw: &str) -> Result<ItemPopularity, ProviderError>;
 
     /// Partidas a partir da resposta de `StatsQuery::PublicMatches`.
     fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError>;

@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use crate::application::ports::{
     BoxFuture, CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
 };
-use crate::domain::match_data::{HeroMatch, MatchDetails, PublicMatchSummary};
+use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
 use crate::domain::patch::PatchCatalog;
 
 /// Resposta registrada para uma consulta.
@@ -20,6 +20,7 @@ pub enum FakeResponse {
     HeroMatches(Vec<HeroMatch>),
     MatchDetails(MatchDetails),
     PublicMatches(Vec<PublicMatchSummary>),
+    ItemPopularity(ItemPopularity),
     /// A busca funciona, mas a resposta não decodifica (formato novo).
     Malformed,
 }
@@ -98,6 +99,13 @@ impl StatsProvider for FakeStatsProvider {
     fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError> {
         match self.response(raw) {
             Some(FakeResponse::MatchDetails(details)) => Ok(details),
+            _ => Err(unexpected()),
+        }
+    }
+
+    fn decode_item_popularity(&self, raw: &str) -> Result<ItemPopularity, ProviderError> {
+        match self.response(raw) {
+            Some(FakeResponse::ItemPopularity(popularity)) => Ok(popularity),
             _ => Err(unexpected()),
         }
     }

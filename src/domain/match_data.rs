@@ -35,6 +35,27 @@ pub fn source_game_modes(mode: GameMode) -> &'static [u32] {
     }
 }
 
+/// Fase do jogo na popularidade de itens, como o OpenDota a define.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PopularityPhase {
+    /// Antes do início da partida.
+    Start,
+    /// Até 10 minutos, itens de custo ≥ 700.
+    Early,
+    /// De 10 a 25 minutos, itens de custo ≥ 2000.
+    Mid,
+    /// Depois de 25 minutos, itens de custo ≥ 4000.
+    Late,
+}
+
+/// Itens mais comprados em cada fase em partidas profissionais, com a
+/// contagem; mostra popularidade, não taxa de vitória.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemPopularity {
+    /// Por fase, os itens (nome interno) do mais ao menos comprado.
+    pub phases: Vec<(PopularityPhase, Vec<(String, u32)>)>,
+}
+
 /// Partida da lista pública (amostra aleatória). A lista não revela os
 /// heróis, que vêm dos detalhes da partida.
 #[derive(Debug, Clone, PartialEq, Eq)]

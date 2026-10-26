@@ -11,7 +11,9 @@ use crate::application::ports::{
 };
 use crate::domain::builds::Purchase;
 use crate::domain::item_catalog::ItemCatalog;
-use crate::domain::match_data::{HeroMatch, MatchDetails, MatchPlayer, PublicMatchSummary};
+use crate::domain::match_data::{
+    HeroMatch, ItemPopularity, MatchDetails, MatchPlayer, PopularityPhase, PublicMatchSummary,
+};
 use crate::domain::patch::{Patch, PatchCatalog};
 
 use super::http_json::HttpJsonClient;
@@ -61,6 +63,7 @@ fn path(query: &StatsQuery) -> String {
         StatsQuery::Patches => "/constants/patch".into(),
         StatsQuery::HeroMatches { hero_id } => format!("/heroes/{hero_id}/matches"),
         StatsQuery::MatchDetails { match_id } => format!("/matches/{match_id}"),
+        StatsQuery::ItemPopularity { hero_id } => format!("/heroes/{hero_id}/itemPopularity"),
         StatsQuery::PublicMatches { less_than_match_id } => match less_than_match_id {
             Some(match_id) => format!("/publicMatches?less_than_match_id={match_id}"),
             None => "/publicMatches".into(),
@@ -82,6 +85,7 @@ impl StatsProvider for OpenDotaProvider {
                 StatsQuery::MatchDetails { .. } => reduce_match(&value),
                 StatsQuery::Patches
                 | StatsQuery::HeroMatches { .. }
+                | StatsQuery::ItemPopularity { .. }
                 | StatsQuery::PublicMatches { .. } => value,
             };
             Ok(kept.to_string())
@@ -102,6 +106,10 @@ impl StatsProvider for OpenDotaProvider {
 
     fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError> {
         decode_public_matches(raw)
+    }
+
+    fn decode_item_popularity(&self, raw: &str) -> Result<ItemPopularity, ProviderError> {
+        decode_item_popularity(raw, &self.items)
     }
 }
 
@@ -163,6 +171,48 @@ fn decode_hero_matches(raw: &str) -> Result<Vec<HeroMatch>, ProviderError> {
             })
         })
         .collect())
+}
+
+/// `/heroes/{id}/itemPopularity`: um objeto por fase (`start_game_items`,
+/// `early_game_items`, `mid_game_items`, `late_game_items`), com o ID do
+/// item em texto como chave e a contagem como valor. ID desconhecido fica
+/// de fora; fase ausente fica vazia.
+fn decode_item_popularity(raw: &str, items: &ItemCatalog) -> Result<ItemPopularity, ProviderError> {
+    let path = "/heroes/{hero_id}/itemPopularity";
+    let value = parse(raw, path)?;
+    if !value.is_object() {
+        return Err(ProviderError::UnexpectedFormat {
+            path: path.into(),
+            detail: "a popularidade de itens não é um objeto",
+        });
+    }
+    let phases = [
+        (PopularityPhase::Start, "start_game_items"),
+        (PopularityPhase::Early, "early_game_items"),
+        (PopularityPhase::Mid, "mid_game_items"),
+        (PopularityPhase::Late, "late_game_items"),
+    ]
+    .into_iter()
+    .map(|(phase, field)| {
+        let mut counts: Vec<(String, u32)> = value
+            .get(field)
+            .and_then(Value::as_object)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|(id, count)| {
+                        let item = items.by_id(id.parse().ok()?)?;
+                        Some((item.name.clone(), u32::try_from(count.as_u64()?).ok()?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Mais comprado primeiro; empate pelo nome, para a ordem ser estável.
+        counts.sort_by(|first, second| second.1.cmp(&first.1).then(first.0.cmp(&second.0)));
+        (phase, counts)
+    })
+    .collect();
+    Ok(ItemPopularity { phases })
 }
 
 /// `/publicMatches`: lista com `match_id`, `game_mode`, `lobby_type`,

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use crate::application::ports::{PublicBuild, PublicBuildStore, StorageError};
 use crate::domain::builds::MatchBuild;
 
-/// Guarda as builds e o cursor como o SQLite, sem banco: ignora a mesma
+/// Guarda as builds e o cursor como o SQLite, sem banco: descarta a mesma
 /// partida e herói repetidos e filtra a leitura por herói, modo e patch.
 #[derive(Default)]
 pub struct MemoryPublicBuildStore {

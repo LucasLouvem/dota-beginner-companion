@@ -8,6 +8,7 @@ pub mod install_gsi_config;
 pub mod pro_builds;
 pub mod public_collection;
 pub mod recommendation_request;
+pub mod recommendations;
 pub mod record_gsi_event;
 pub mod record_gsi_payload;
 pub mod run_diagnostics;
