@@ -3,10 +3,18 @@
 use super::*;
 use crate::application::error::{DiagnosticCode, Redactor};
 use crate::application::ports::{BoxFuture, ConnectionTestError, GsiRecordError, LocatorResult};
-use crate::application::state::{GsiLogStatus, ModeOrigin, ModeState};
-use crate::domain::game::{GameMode, GamePhase, GameSnapshot};
+use crate::application::ports::{
+    CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
+};
+use crate::application::state::{GsiLogStatus, ModeOrigin, ModeState, RecommendationStatus};
+use crate::domain::game::{GameMode, GamePhase, GameSnapshot, HeroPick};
+use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, Provenance};
-use crate::test_support::{CapturedLogs, MemoryFiles, capture_logs};
+use crate::domain::patch::{Patch, PatchCatalog};
+use crate::test_support::{
+    CapturedLogs, FakeStatsProvider, MemoryCache, MemoryFiles, MemoryPublicBuildStore,
+    UnlimitedBudget, capture_logs,
+};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -91,6 +99,7 @@ fn dependencies() -> CoreDependencies {
             port: 53000,
             token: "token".into(),
         },
+        external: None,
     }
 }
 
@@ -746,4 +755,205 @@ async fn restarted_core_asks_with_all_pick_again() {
             preselected: GameMode::AllPick
         }
     );
+}
+
+/// Fonte de estatísticas que segura a primeira busca de `gated` até o teste
+/// liberar, avisando quando ela começou; as demais buscas vão direto ao
+/// provider em memória.
+struct GatedStats {
+    inner: FakeStatsProvider,
+    gated: StatsQuery,
+    used: AtomicBool,
+    started: mpsc::UnboundedSender<()>,
+    release: tokio::sync::Notify,
+}
+
+impl StatsProvider for GatedStats {
+    fn fetch<'a>(
+        &'a self,
+        query: &'a StatsQuery,
+        category: CallCategory,
+        budget: &'a dyn CallBudget,
+    ) -> BoxFuture<'a, Result<String, ProviderError>> {
+        Box::pin(async move {
+            if *query == self.gated && !self.used.swap(true, Ordering::SeqCst) {
+                self.started.send(()).unwrap();
+                self.release.notified().await;
+            }
+            self.inner.fetch(query, category, budget).await
+        })
+    }
+
+    fn decode_patches(&self, raw: &str) -> Result<PatchCatalog, ProviderError> {
+        self.inner.decode_patches(raw)
+    }
+
+    fn decode_hero_matches(&self, raw: &str) -> Result<Vec<HeroMatch>, ProviderError> {
+        self.inner.decode_hero_matches(raw)
+    }
+
+    fn decode_match_details(&self, raw: &str) -> Result<MatchDetails, ProviderError> {
+        self.inner.decode_match_details(raw)
+    }
+
+    fn decode_item_popularity(&self, raw: &str) -> Result<ItemPopularity, ProviderError> {
+        self.inner.decode_item_popularity(raw)
+    }
+
+    fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError> {
+        self.inner.decode_public_matches(raw)
+    }
+}
+
+/// Núcleo com fontes externas em memória; a lista de partidas do herói
+/// `gated_hero` fica presa na primeira busca. O patch atual vem dos dados
+/// embutidos (7.41), porque o provider não tem a lista de patches.
+fn start_with_gated_hero(
+    gated_hero: u32,
+) -> (RunningCore, Arc<GatedStats>, mpsc::UnboundedReceiver<()>) {
+    let (started, started_receiver) = mpsc::unbounded_channel();
+    let stats = Arc::new(GatedStats {
+        inner: FakeStatsProvider::default(),
+        gated: StatsQuery::HeroMatches {
+            hero_id: gated_hero,
+        },
+        used: AtomicBool::new(false),
+        started,
+        release: tokio::sync::Notify::new(),
+    });
+    let external = ExternalSources {
+        provider: stats.clone(),
+        budget: Arc::new(UnlimitedBudget),
+        cache: Arc::new(MemoryCache::default()),
+        store: Arc::new(MemoryPublicBuildStore::default()),
+        items: Arc::default(),
+        embedded_patches: Some(PatchCatalog::new(vec![Patch {
+            id: 60,
+            name: "7.41".into(),
+        }])),
+    };
+    let core = start(
+        CoreDependencies {
+            external: Some(external),
+            ..dependencies()
+        },
+        AppSnapshot::default(),
+    );
+    (core, stats, started_receiver)
+}
+
+fn hero_event(hero_id: u32) -> CoreEvent {
+    CoreEvent::GsiAccepted {
+        raw: "{}".into(),
+        at: SystemTime::now(),
+        is_test: false,
+        game: Some(Box::new(GameSnapshot {
+            phase: Some(GamePhase::InProgress),
+            hero: HeroPick::Picked {
+                name: format!("npc_dota_hero_{hero_id}"),
+                id: Some(hero_id),
+            },
+            ..GameSnapshot::menu()
+        })),
+    }
+}
+
+fn ready_for(snapshot: &AppSnapshot, hero_id: u32, mode: GameMode) -> bool {
+    matches!(
+        &snapshot.recommendations,
+        RecommendationStatus::Ready(recommendations)
+            if recommendations.key.hero_id == hero_id && recommendations.key.mode == mode
+    )
+}
+
+const DISCARDED_RECOMMENDATIONS_LOG: &str = "discarded recommendations of an older request";
+
+#[tokio::test]
+async fn late_recommendations_of_a_previous_hero_do_not_replace_the_current_ones() {
+    let (_guard, logs) = capture_logs();
+    let (mut core, stats, mut started) = start_with_gated_hero(1);
+    wait_for(&mut core.state, |snapshot| {
+        matches!(snapshot.recommendations, RecommendationStatus::Idle)
+    })
+    .await;
+
+    // A consulta do herói 1 começa e fica presa na lista de partidas.
+    core.events.send(hero_event(1)).await.unwrap();
+    tokio::time::timeout(STATE_TIMEOUT, started.recv())
+        .await
+        .expect("a consulta do herói 1 deve começar")
+        .unwrap();
+    // O herói muda para o 2, cuja consulta termina.
+    core.events.send(hero_event(2)).await.unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        ready_for(snapshot, 2, GameMode::AllPick)
+    })
+    .await;
+
+    // A consulta antiga do herói 1 termina depois e é descartada.
+    stats.release.notify_one();
+    wait_for_log(&logs, DISCARDED_RECOMMENDATIONS_LOG).await;
+    assert!(ready_for(&core.state.borrow(), 2, GameMode::AllPick));
+}
+
+#[tokio::test]
+async fn late_recommendations_of_a_previous_mode_do_not_replace_the_current_ones() {
+    let (_guard, logs) = capture_logs();
+    let (mut core, stats, mut started) = start_with_gated_hero(1);
+    wait_for(&mut core.state, |snapshot| {
+        matches!(snapshot.recommendations, RecommendationStatus::Idle)
+    })
+    .await;
+    core.events.send(hero_event(1)).await.unwrap();
+    tokio::time::timeout(STATE_TIMEOUT, started.recv())
+        .await
+        .expect("a consulta em Escolha Livre deve começar")
+        .unwrap();
+
+    core.commands.send(UiCommand::MarkMatchFound).unwrap();
+    core.commands
+        .send(UiCommand::ChooseGameMode {
+            match_number: 1,
+            mode: GameMode::Turbo,
+            origin: ModeOrigin::Chosen,
+        })
+        .unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        ready_for(snapshot, 1, GameMode::Turbo)
+    })
+    .await;
+
+    stats.release.notify_one();
+    wait_for_log(&logs, DISCARDED_RECOMMENDATIONS_LOG).await;
+    assert!(ready_for(&core.state.borrow(), 1, GameMode::Turbo));
+}
+
+#[tokio::test]
+async fn recommendations_are_unavailable_without_external_sources() {
+    let mut core = start(dependencies(), AppSnapshot::default());
+    core.events.send(hero_event(1)).await.unwrap();
+
+    let snapshot = wait_for(&mut core.state, |snapshot| snapshot.gsi.dota_events == 1).await;
+
+    assert!(matches!(
+        snapshot.recommendations,
+        RecommendationStatus::Unavailable
+    ));
+}
+
+#[tokio::test]
+async fn returning_to_the_menu_without_last_match_makes_recommendations_idle() {
+    let (mut core, _stats, _started) = start_with_gated_hero(99);
+    core.events.send(hero_event(2)).await.unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        ready_for(snapshot, 2, GameMode::AllPick)
+    })
+    .await;
+
+    core.events.send(dota_event()).await.unwrap();
+
+    wait_for(&mut core.state, |snapshot| {
+        matches!(snapshot.recommendations, RecommendationStatus::Idle)
+    })
+    .await;
 }

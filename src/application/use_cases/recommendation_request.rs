@@ -56,6 +56,11 @@ impl RequestTracker {
         self.current = None;
     }
 
+    /// Chave da consulta atual, se houver.
+    pub fn current(&self) -> Option<&RecommendationKey> {
+        self.current.as_ref()
+    }
+
     /// A resposta de `ticket` ainda é a da consulta atual.
     pub fn accepts(&self, ticket: &RequestTicket) -> bool {
         ticket.generation == self.generation && self.current.as_ref() == Some(&ticket.key)

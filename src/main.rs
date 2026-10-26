@@ -80,6 +80,9 @@ fn main() -> anyhow::Result<()> {
         }),
     );
 
+    // Sem o banco local ou o cliente HTTP o app segue, sem recomendações nem
+    // coleta de partidas públicas.
+    let external = external_sources(&storage::database_path(), &items);
     let dependencies = CoreDependencies {
         locator: Arc::new(infrastructure::steam_locator::SteamLocator::new(
             home,
@@ -98,6 +101,7 @@ fn main() -> anyhow::Result<()> {
         }),
         items: Arc::clone(&items),
         endpoint: endpoint.clone(),
+        external: external.clone(),
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -129,9 +133,7 @@ fn main() -> anyhow::Result<()> {
         event_receiver,
         Arc::new(state_sender),
     ));
-    // Sem o banco local ou o cliente HTTP o app segue, sem coletar partidas
-    // públicas.
-    if let Some(sources) = external_sources(&storage::database_path(), &items) {
+    if let Some(sources) = external {
         runtime.spawn(run_collection(sources));
     }
 
@@ -164,7 +166,7 @@ fn external_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<Externa
     let failed = |diagnostic_source: &dyn ToDiagnostic| {
         log_error(
             &diagnostic_source.to_diagnostic(&Redactor::default()),
-            "public match collection disabled",
+            "external data disabled: no recommendations or public match collection",
         );
     };
     let budget = SqliteCallBudget::open(database, BudgetLimits::default())

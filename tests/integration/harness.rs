@@ -75,6 +75,7 @@ impl RunningCore {
             recorder: None,
             items: Arc::new(dota_companion::infrastructure::item_data::embedded_catalog().unwrap()),
             endpoint,
+            external: None,
         };
         let (commands, command_receiver) = mpsc::unbounded_channel();
         let (events, event_receiver) = mpsc::channel(16);

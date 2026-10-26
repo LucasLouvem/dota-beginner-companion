@@ -75,7 +75,7 @@ Nos testes, os casos de uso recebem implementações falsas desses ports. Os tes
 
 1. O Dota envia um POST JSON para `http://127.0.0.1:<porta>/`.
 2. O servidor valida o token e o JSON e publica um `CoreEvent`: aceito, recusado, servidor ouvindo ou servidor com falha. Um evento aceito do Dota leva também o estado de jogo normalizado (`gsi::normalize`); cada campo é lido isoladamente, e um bloco vazio (`{}`) significa "sem dado".
-3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual, a linha do tempo da partida e o resumo da última partida terminada, que fica disponível até a próxima partida ser encontrada.
+3. O laço do núcleo (`application::core`) aplica o evento ao `GsiStatus`, passa o estado de jogo ao `MatchTracker` (`domain::match_events`) e publica um novo `AppSnapshot` com o estado atual, a linha do tempo da partida e o resumo da última partida terminada, que fica disponível até a próxima partida ser encontrada. Com as fontes externas disponíveis, o núcleo também mantém as recomendações (`RecommendationStatus`): carrega o patch atual ao iniciar e, a cada mudança do herói (da partida atual, ou da última enquanto ela é mostrada), do modo ou do patch, inicia uma consulta em uma tarefa; só a resposta da consulta atual é publicada, e a de uma consulta substituída é descartada e registrada no log.
 4. A interface lê o `AppSnapshot` mais recente e atualiza nas telas só as linhas que mudaram. Na aba Herói, eventos novos entram no topo da linha do tempo e os mais antigos saem de baixo, sem recriar as demais linhas.
 5. Os botões da interface enviam `UiCommand`: rodar diagnóstico, testar conexão, instalar a configuração GSI, marcar "Partida encontrada" ou informar o modo de jogo. O núcleo executa o caso de uso correspondente e publica o resultado no `AppSnapshot`.
 
@@ -119,10 +119,9 @@ O GSI não informa o modo de jogo nem o momento em que a partida é aceita. Cada
 
 Decisões de arquitetura já aprovadas que ainda não existem no código. Quando uma delas é implementada, ela sai desta tabela e passa a ser descrita nas seções acima.
 
-| Camada          | Decisão                                                                                                                                                                |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`       | Configurações e histórico de partidas no SQLite (o cache já existe; ver acima)                                                                                         |
-| `providers`     | A aplicação depende de uma interface de provider (port) com as consultas do OpenDota, ligada ao núcleo, que só publica a resposta da consulta atual (`RequestTracker`) |
-| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                                                |
-| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                                      |
-| Testes          | Testes ponta a ponta (E2E) em `tests/e2e_tests.rs`, exercitando o aplicativo completo pelas interfaces externas, conforme [TESTING.md](TESTING.md)                     |
+| Camada          | Decisão                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`       | Configurações e histórico de partidas no SQLite (o cache já existe; ver acima)                                                                     |
+| `notifications` | Notificações do sistema, desligadas por padrão (opt-in)                                                                                            |
+| `application`   | Histórico de partidas gravado e lido por meio da camada `storage`                                                                                  |
+| Testes          | Testes ponta a ponta (E2E) em `tests/e2e_tests.rs`, exercitando o aplicativo completo pelas interfaces externas, conforme [TESTING.md](TESTING.md) |

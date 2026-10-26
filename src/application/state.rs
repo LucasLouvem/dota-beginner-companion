@@ -14,6 +14,8 @@ use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText};
 use super::event_bus::{GsiServerError, RejectReason};
 use super::ports::{ConnectionTestError, GsiRecordError, SharedError};
 use super::use_cases::install_gsi_config::InstallError;
+use super::use_cases::recommendation_request::RecommendationKey;
+use super::use_cases::recommendations::Recommendations;
 
 /// Operação que o núcleo executa em uma tarefa separada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +24,7 @@ pub enum CoreOperation {
     InstallGsiConfig,
     ConnectionTest,
     GsiLog,
+    Recommendations,
 }
 
 impl fmt::Display for CoreOperation {
@@ -31,6 +34,7 @@ impl fmt::Display for CoreOperation {
             CoreOperation::InstallGsiConfig => "instalação do arquivo GSI",
             CoreOperation::ConnectionTest => "teste de conexão",
             CoreOperation::GsiLog => "gravação do log de eventos GSI",
+            CoreOperation::Recommendations => "consulta de recomendações",
         })
     }
 }
@@ -75,6 +79,7 @@ impl ToDiagnostic for TaskInterrupted {
             CoreOperation::InstallGsiConfig => "A instalação do arquivo GSI foi interrompida",
             CoreOperation::ConnectionTest => "O teste de conexão foi interrompido",
             CoreOperation::GsiLog => "A gravação do log de eventos GSI parou",
+            CoreOperation::Recommendations => "A consulta de recomendações foi interrompida",
         };
         let cause = match self.cause {
             InterruptionCause::Panicked => "A tarefa terminou com uma falha interna (pânico).",
@@ -214,6 +219,24 @@ pub struct MatchStatus {
     pub last_confirmed_mode: Option<GameMode>,
 }
 
+/// Recomendações de itens e habilidades exibidas.
+#[derive(Debug, Clone, Default)]
+pub enum RecommendationStatus {
+    /// Sem banco local ou cliente HTTP: não há recomendações nesta execução.
+    #[default]
+    Unavailable,
+    /// Sem herói ou sem patch atual para consultar.
+    Idle,
+    Loading {
+        key: RecommendationKey,
+    },
+    Ready(Arc<Recommendations>),
+    Interrupted {
+        key: RecommendationKey,
+        interrupted: TaskInterrupted,
+    },
+}
+
 /// Estado completo exibido pela interface.
 #[derive(Debug, Clone, Default)]
 pub struct AppSnapshot {
@@ -233,4 +256,5 @@ pub struct AppSnapshot {
     pub gsi_log: Option<GsiLogStatus>,
     /// Remove o token dos diagnósticos exibidos.
     pub redactor: Redactor,
+    pub recommendations: RecommendationStatus,
 }

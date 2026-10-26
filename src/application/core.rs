@@ -11,15 +11,21 @@ use tokio::task::{JoinError, JoinHandle};
 use crate::domain::gsi_config::GsiEndpoint;
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_events::MatchTracker;
+use crate::domain::patch::Patch;
 
 use super::diagnostics::DiagnosticReport;
 use super::error::{ToDiagnostic, log_error};
 use super::event_bus::{CoreEvent, UiCommand};
 use super::ports::{ConfigFiles, ConnectionTester, DotaLocator, GsiRecorder, ProcessProbe};
 use super::state::{
-    AppSnapshot, ConnectionTest, CoreOperation, InstallOutcome, InterruptionCause, TaskInterrupted,
+    AppSnapshot, ConnectionTest, CoreOperation, InstallOutcome, InterruptionCause,
+    RecommendationStatus, TaskInterrupted,
 };
+use super::use_cases::current_patch::load_current_patch;
+use super::use_cases::external_sources::ExternalSources;
 use super::use_cases::install_gsi_config::install_gsi_config;
+use super::use_cases::recommendation_request::{RequestTicket, RequestTracker};
+use super::use_cases::recommendations::{Recommendations, desired_key, load_recommendations};
 use super::use_cases::record_gsi_event::record_gsi_event;
 use super::use_cases::record_gsi_payload::{apply_record_result, payload_to_record};
 use super::use_cases::run_diagnostics::run_diagnostics;
@@ -78,6 +84,132 @@ pub struct CoreDependencies {
     /// Receitas usadas para reconhecer itens montados na linha do tempo.
     pub items: Arc<ItemCatalog>,
     pub endpoint: GsiEndpoint,
+    /// Fontes das recomendações; ausentes quando o banco local ou o cliente
+    /// HTTP não puderam ser abertos.
+    pub external: Option<ExternalSources>,
+}
+
+/// Resultado das tarefas de recomendação, entregue ao laço do núcleo.
+enum RecommendationMessage {
+    PatchLoaded(Option<Patch>),
+    Loaded(RequestTicket, Box<Recommendations>),
+    Interrupted(RequestTicket, TaskInterrupted),
+}
+
+/// Consultas de recomendação em andamento. Cada mudança de herói, modo ou
+/// patch inicia uma consulta; só a resposta da consulta atual é publicada.
+struct RecommendationRuntime {
+    sources: ExternalSources,
+    tracker: RequestTracker,
+    patch: Option<Patch>,
+    sender: mpsc::UnboundedSender<RecommendationMessage>,
+}
+
+impl RecommendationRuntime {
+    /// Marca as recomendações como ociosas e começa a carregar o patch atual.
+    fn start(
+        sources: ExternalSources,
+        sender: mpsc::UnboundedSender<RecommendationMessage>,
+        state: &watch::Sender<AppSnapshot>,
+    ) -> Self {
+        state.send_modify(|snapshot| snapshot.recommendations = RecommendationStatus::Idle);
+        let patch_sources = sources.clone();
+        let patch_sender = sender.clone();
+        tokio::spawn(async move {
+            let patch = load_current_patch(
+                patch_sources.provider,
+                patch_sources.budget,
+                patch_sources.cache,
+                SystemTime::now(),
+                patch_sources.embedded_patches,
+            )
+            .await;
+            // Canal fechado só no encerramento do runtime; nada a fazer.
+            let _ = patch_sender.send(RecommendationMessage::PatchLoaded(patch.value));
+        });
+        Self {
+            sources,
+            tracker: RequestTracker::default(),
+            patch: None,
+            sender,
+        }
+    }
+
+    /// Inicia a consulta da chave desejada pelo estado atual, se ela mudou.
+    fn refresh(&mut self, state: &watch::Sender<AppSnapshot>) {
+        let wanted = desired_key(
+            &state.borrow().match_status,
+            self.patch.as_ref().map(|patch| patch.id),
+        );
+        let Some(key) = wanted else {
+            if self.tracker.current().is_some() {
+                self.tracker.clear();
+                state.send_modify(|snapshot| snapshot.recommendations = RecommendationStatus::Idle);
+            }
+            return;
+        };
+        let (Some(ticket), Some(patch)) = (self.tracker.start(key.clone()), self.patch.clone())
+        else {
+            return;
+        };
+        state.send_modify(|snapshot| {
+            snapshot.recommendations = RecommendationStatus::Loading { key: key.clone() }
+        });
+        let sources = self.sources.clone();
+        let sender = self.sender.clone();
+        let task = tokio::spawn(async move {
+            load_recommendations(&sources, key, patch, SystemTime::now()).await
+        });
+        tokio::spawn(async move {
+            let message = match task.await {
+                Ok(recommendations) => {
+                    RecommendationMessage::Loaded(ticket, Box::new(recommendations))
+                }
+                Err(join_error) => RecommendationMessage::Interrupted(
+                    ticket,
+                    interrupted_by(CoreOperation::Recommendations, join_error),
+                ),
+            };
+            // Canal fechado só no encerramento do runtime; nada a fazer.
+            let _ = sender.send(message);
+        });
+    }
+
+    fn handle(&mut self, message: RecommendationMessage, state: &watch::Sender<AppSnapshot>) {
+        match message {
+            RecommendationMessage::PatchLoaded(Some(patch)) => {
+                self.patch = Some(patch);
+                self.refresh(state);
+            }
+            RecommendationMessage::PatchLoaded(None) => {
+                tracing::warn!("current patch unknown; recommendations unavailable");
+            }
+            RecommendationMessage::Loaded(ticket, recommendations) => {
+                if self.tracker.accepts(&ticket) {
+                    state.send_modify(|snapshot| {
+                        snapshot.recommendations =
+                            RecommendationStatus::Ready(Arc::from(recommendations))
+                    });
+                } else {
+                    tracing::debug!(
+                        generation = ticket.generation,
+                        "discarded recommendations of an older request"
+                    );
+                }
+            }
+            RecommendationMessage::Interrupted(ticket, interrupted) => {
+                log_interruption(state, &interrupted);
+                if self.tracker.accepts(&ticket) {
+                    state.send_modify(|snapshot| {
+                        snapshot.recommendations = RecommendationStatus::Interrupted {
+                            key: ticket.key,
+                            interrupted,
+                        }
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// Processa eventos do coletor GSI e comandos da interface, rodando o
@@ -96,6 +228,11 @@ pub async fn run(
         .map(|recorder| spawn_recorder(recorder, Arc::clone(&state)));
     let mut match_tracker = MatchTracker::new(Arc::clone(&dependencies.items));
     let rounds = DiagnosticsRounds::default();
+    let (recommendation_sender, mut recommendation_receiver) = mpsc::unbounded_channel();
+    let mut recommendations = dependencies
+        .external
+        .clone()
+        .map(|sources| RecommendationRuntime::start(sources, recommendation_sender, &state));
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
@@ -115,9 +252,20 @@ pub async fn run(
                         record_match_update(&mut snapshot.match_status, game, match_events, at);
                     }
                 });
+                if let Some(runtime) = &mut recommendations {
+                    runtime.refresh(&state);
+                }
             }
             Some(command) = commands.recv() => {
                 handle_command(&dependencies, &state, &rounds, command);
+                if let Some(runtime) = &mut recommendations {
+                    runtime.refresh(&state);
+                }
+            }
+            Some(message) = recommendation_receiver.recv() => {
+                if let Some(runtime) = &mut recommendations {
+                    runtime.handle(message, &state);
+                }
             }
             _ = ticker.tick() => spawn_diagnostics(&dependencies, &state, &rounds),
         }
