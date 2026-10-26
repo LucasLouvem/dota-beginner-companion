@@ -1,16 +1,16 @@
 //! Testes unitários de `src/application/use_cases/recommendations.rs`.
 
 use super::*;
-use crate::application::ports::{PublicBuild, PublicBuildStore};
+use crate::application::ports::PublicBuildStore;
 use crate::application::state::ModeOrigin;
 use crate::application::use_cases::fallback::DataOrigin;
-use crate::domain::builds::{BuildEvidence, BuildKey, MatchBuild};
 use crate::domain::game::GameSnapshot;
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::PopularityPhase;
 use crate::domain::match_events::{MatchResult, MatchSummary};
 use crate::test_support::{
     FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
+    public_win, zeus_build,
 };
 use std::time::UNIX_EPOCH;
 
@@ -103,41 +103,20 @@ fn no_key_without_hero_id_or_patch() {
     assert_eq!(desired_key(&in_match(picked(22)), None), None);
 }
 
-fn unordered(items: [&str; 3]) -> MatchBuild {
-    MatchBuild {
-        key: BuildKey {
-            evidence: BuildEvidence::FinalInventoryUnordered,
-            items: items.iter().map(|item| (*item).into()).collect(),
-        },
-        times: None,
+/// Vitórias públicas do Zeus, uma por partida, no `game_mode`.
+fn store_wins(store: &MemoryPublicBuildStore, match_ids: std::ops::Range<u64>, game_mode: u32) {
+    for match_id in match_ids {
+        let win = PublicWin {
+            game_mode,
+            start_time: Some(1_792_970_000 + match_id as i64),
+            ..public_win(match_id, zeus_build())
+        };
+        store.save_match(&[win], match_id).unwrap();
     }
 }
 
-/// `count` partidas públicas do Zeus com a mesma build, no `game_mode`.
-fn store_builds(
-    store: &MemoryPublicBuildStore,
-    first_match: u64,
-    count: u64,
-    game_mode: u32,
-    build: MatchBuild,
-) {
-    for match_id in first_match..first_match + count {
-        store
-            .save_match(
-                &[PublicBuild {
-                    match_id,
-                    hero_id: 22,
-                    game_mode,
-                    patch_id: PATCH,
-                    start_time: None,
-                    avg_rank_tier: None,
-                    won: match_id % 2 == 0,
-                    build: build.clone(),
-                }],
-                match_id,
-            )
-            .unwrap();
-    }
+fn match_ids(wins: &[PublicWin]) -> Vec<u64> {
+    wins.iter().map(|win| win.match_id).collect()
 }
 
 fn sources(provider: FakeStatsProvider, store: MemoryPublicBuildStore) -> ExternalSources {
@@ -159,53 +138,29 @@ fn patch() -> Patch {
 }
 
 #[tokio::test]
-async fn public_builds_come_from_the_mode_sources_only() {
+async fn public_wins_come_from_the_mode_sources_only() {
     let store = MemoryPublicBuildStore::default();
-    store_builds(&store, 1, 12, 23, unordered(["item_a", "item_b", "item_c"]));
-    store_builds(
-        &store,
-        100,
-        10,
-        1,
-        unordered(["item_x", "item_y", "item_z"]),
-    );
-    store_builds(
-        &store,
-        200,
-        10,
-        22,
-        unordered(["item_x", "item_y", "item_z"]),
-    );
+    store_wins(&store, 1..3, 23);
+    store_wins(&store, 100..102, 1);
+    store_wins(&store, 200..201, 22);
     let sources = sources(FakeStatsProvider::default(), store);
 
     let turbo = load_recommendations(&sources, key(22, GameMode::Turbo), patch(), UNIX_EPOCH).await;
     let bots = load_recommendations(&sources, key(22, GameMode::Bots), patch(), UNIX_EPOCH).await;
 
-    assert_eq!(turbo.public.analyzed, 12);
+    assert_eq!(match_ids(&turbo.public_wins), [2, 1]);
     assert_eq!(
-        turbo.public.builds[0].key.items,
-        ["item_a", "item_b", "item_c"]
+        match_ids(&bots.public_wins),
+        [200, 101, 100],
+        "Escolha Livre comum e ranqueada, das mais recentes"
     );
-    assert_eq!(bots.public.analyzed, 20, "Escolha Livre comum e ranqueada");
-    assert_eq!(
-        bots.public.builds[0].key.items,
-        ["item_x", "item_y", "item_z"]
-    );
+    assert!(turbo.public_error.is_none());
 }
 
 #[tokio::test]
-async fn at_most_five_public_builds_are_kept() {
+async fn at_most_five_recent_public_wins_are_kept() {
     let store = MemoryPublicBuildStore::default();
-    for index in 0..7u64 {
-        let name = format!("item_{index}");
-        store_builds(
-            &store,
-            index * 100,
-            10,
-            23,
-            unordered([name.as_str(), "item_y", "item_z"]),
-        );
-    }
+    store_wins(&store, 0..7, 23);
 
     let recommendations = load_recommendations(
         &sources(FakeStatsProvider::default(), store),
@@ -215,8 +170,8 @@ async fn at_most_five_public_builds_are_kept() {
     )
     .await;
 
-    assert_eq!(recommendations.public.builds.len(), PUBLIC_BUILDS_SHOWN);
-    assert_eq!(recommendations.public.analyzed, 70);
+    assert_eq!(match_ids(&recommendations.public_wins), [6, 5, 4, 3, 2]);
+    assert_eq!(recommendations.public_wins.len(), PUBLIC_WINS_SHOWN);
 }
 
 #[tokio::test]

@@ -1,15 +1,16 @@
-//! Builds públicas em memória.
+//! Vitórias públicas em memória.
 
 use std::sync::Mutex;
 
-use crate::application::ports::{PublicBuild, PublicBuildStore, StorageError};
-use crate::domain::builds::MatchBuild;
+use std::cmp::Reverse;
 
-/// Guarda as builds e o cursor como o SQLite, sem banco: descarta a mesma
-/// partida e herói repetidos e filtra a leitura por herói, modo e patch.
+use crate::application::ports::{PublicBuildStore, PublicWin, StorageError};
+
+/// Guarda as vitórias e o cursor como o SQLite, sem banco: descarta a mesma
+/// partida e herói repetidos e lê por herói, modo e patch, das mais recentes.
 #[derive(Default)]
 pub struct MemoryPublicBuildStore {
-    builds: Mutex<Vec<PublicBuild>>,
+    wins: Mutex<Vec<PublicWin>>,
     cursor: Mutex<Option<u64>>,
 }
 
@@ -20,8 +21,8 @@ impl MemoryPublicBuildStore {
         store
     }
 
-    pub fn saved(&self) -> Vec<PublicBuild> {
-        self.builds.lock().unwrap().clone()
+    pub fn saved(&self) -> Vec<PublicWin> {
+        self.wins.lock().unwrap().clone()
     }
 
     pub fn current_cursor(&self) -> Option<u64> {
@@ -30,14 +31,14 @@ impl MemoryPublicBuildStore {
 }
 
 impl PublicBuildStore for MemoryPublicBuildStore {
-    fn save_match(&self, builds: &[PublicBuild], cursor: u64) -> Result<(), StorageError> {
-        let mut saved = self.builds.lock().unwrap();
-        for build in builds {
+    fn save_match(&self, wins: &[PublicWin], cursor: u64) -> Result<(), StorageError> {
+        let mut saved = self.wins.lock().unwrap();
+        for win in wins {
             let repeated = saved.iter().any(|existing| {
-                existing.match_id == build.match_id && existing.hero_id == build.hero_id
+                existing.match_id == win.match_id && existing.hero_id == win.hero_id
             });
             if !repeated {
-                saved.push(build.clone());
+                saved.push(win.clone());
             }
         }
         *self.cursor.lock().unwrap() = Some(cursor);
@@ -53,30 +54,40 @@ impl PublicBuildStore for MemoryPublicBuildStore {
         Ok(())
     }
 
-    fn builds(
+    fn recent_wins(
         &self,
         hero_id: u32,
         game_modes: &[u32],
         patch_id: u32,
-    ) -> Result<Vec<(MatchBuild, bool)>, StorageError> {
-        Ok(self
-            .builds
+        limit: usize,
+    ) -> Result<Vec<PublicWin>, StorageError> {
+        let mut wins: Vec<PublicWin> = self
+            .wins
             .lock()
             .unwrap()
             .iter()
-            .filter(|build| {
-                build.hero_id == hero_id
-                    && build.patch_id == patch_id
-                    && game_modes.contains(&build.game_mode)
+            .filter(|win| {
+                win.hero_id == hero_id
+                    && win.patch_id == patch_id
+                    && game_modes.contains(&win.game_mode)
             })
-            .map(|build| (build.build.clone(), build.won))
-            .collect())
+            .cloned()
+            .collect();
+        wins.sort_by_key(|win| {
+            (
+                win.start_time.is_none(),
+                Reverse(win.start_time),
+                Reverse(win.match_id),
+            )
+        });
+        wins.truncate(limit);
+        Ok(wins)
     }
 
     fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError> {
-        let mut saved = self.builds.lock().unwrap();
+        let mut saved = self.wins.lock().unwrap();
         let before = saved.len();
-        saved.retain(|build| build.patch_id == patch_id);
+        saved.retain(|win| win.patch_id == patch_id);
         Ok(before - saved.len())
     }
 }

@@ -38,17 +38,81 @@ fn version_one_database(path: &Path) {
         .unwrap();
 }
 
+/// Banco como a versão 2 do aplicativo deixava, com cache, orçamento,
+/// cursor e uma build pública no formato antigo.
+fn version_two_database(path: &Path) {
+    version_one_database(path);
+    let connection = Connection::open(path).unwrap();
+    connection.execute_batch(MIGRATIONS[1]).unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO call_budget VALUES ('collection', 'day', '2026-10-25', 12);
+            INSERT INTO collection_cursor VALUES (1, 9061960072);
+            INSERT INTO public_builds VALUES
+                (1, 22, 23, 60, NULL, NULL, 1, 'final_inventory_unordered', '[]', NULL);
+            PRAGMA user_version = 2;",
+        )
+        .unwrap();
+}
+
 #[test]
 fn new_database_gets_every_table_and_the_current_version() {
     let temp_dir = tempfile::tempdir().unwrap();
 
     let connection = open_database(&temp_dir.path().join("data/companion.sqlite3")).unwrap();
 
-    assert_eq!(user_version(&connection), 2);
+    assert_eq!(user_version(&connection), 3);
     assert_eq!(
         table_names(&connection),
-        ["cache", "call_budget", "collection_cursor", "public_builds"]
+        ["cache", "call_budget", "collection_cursor", "public_wins"]
     );
+}
+
+#[test]
+fn version_two_database_drops_old_builds_and_keeps_cache_budget_and_cursor() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().join("companion.sqlite3");
+    version_two_database(&path);
+
+    let connection = open_database(&path).unwrap();
+
+    assert_eq!(user_version(&connection), 3);
+    assert_eq!(
+        table_names(&connection),
+        ["cache", "call_budget", "collection_cursor", "public_wins"]
+    );
+    let kept: (String, i64, i64) = connection
+        .query_row(
+            "SELECT (SELECT value FROM cache WHERE key = 'heroes'),
+                    (SELECT used FROM call_budget),
+                    (SELECT less_than_match_id FROM collection_cursor)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(kept, ("[22]".to_owned(), 12, 9_061_960_072));
+}
+
+#[test]
+fn failed_version_three_migration_keeps_the_old_builds() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().join("companion.sqlite3");
+    version_two_database(&path);
+    // Uma tabela com o nome da tabela nova faz a migração falhar depois de
+    // apagar `public_builds`.
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE public_wins (other TEXT);")
+        .unwrap();
+
+    assert!(open_database(&path).is_err());
+
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(user_version(&connection), 2);
+    let old_builds: i64 = connection
+        .query_row("SELECT COUNT(*) FROM public_builds", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(old_builds, 1, "a migração desfeita não apaga nada");
 }
 
 #[test]
@@ -59,14 +123,14 @@ fn version_one_database_is_migrated_and_keeps_the_cache() {
 
     let connection = open_database(&path).unwrap();
 
-    assert_eq!(user_version(&connection), 2);
+    assert_eq!(user_version(&connection), 3);
     let cached: String = connection
         .query_row("SELECT value FROM cache WHERE key = 'heroes'", [], |row| {
             row.get(0)
         })
         .unwrap();
     assert_eq!(cached, "[22]");
-    assert!(table_names(&connection).contains(&"public_builds".to_owned()));
+    assert!(table_names(&connection).contains(&"public_wins".to_owned()));
 }
 
 #[test]
@@ -190,10 +254,10 @@ fn database_from_newer_app_version_is_refused_without_changes() {
         diagnostic
             .technical_details
             .as_deref()
-            .is_some_and(|details| details.contains("versão de schema 3")),
+            .is_some_and(|details| details.contains("versão de schema 4")),
         "{diagnostic:?}"
     );
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 3);
+    assert_eq!(user_version(&connection), 4);
     assert!(table_names(&connection).is_empty());
 }

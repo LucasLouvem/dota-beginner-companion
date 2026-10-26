@@ -5,16 +5,17 @@
 //! recomendação.
 
 use crate::application::error::{Redactor, ToDiagnostic};
+use crate::application::ports::PublicWin;
 use crate::application::state::RecommendationStatus;
 use crate::application::use_cases::fallback::DataOrigin;
-use crate::application::use_cases::recommendations::Recommendations;
-use crate::domain::builds::{BuildEvidence, MIN_SAMPLE, RankedBuild};
+use crate::application::use_cases::recommendations::{PUBLIC_WINS_SHOWN, Recommendations};
+use crate::domain::builds::{BuildEvidence, MIN_SAMPLE, PlayerBuild, RankedBuild};
 use crate::domain::game::GameMode;
 use crate::domain::hero_catalog::HeroCatalog;
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::PopularityPhase;
 use crate::presentation::i18n::{translate, translate_with};
-use crate::presentation::widgets::{Level, RowContent, format_duration, format_time};
+use crate::presentation::widgets::{Level, RowContent, format_date, format_duration, format_time};
 
 use super::hero::mode_label;
 
@@ -196,16 +197,18 @@ fn ready_content(
     }
 
     let mut public: Vec<RowContent> = recommendations
-        .public
-        .builds
+        .public_wins
         .iter()
-        .map(|build| build_row(build, items))
+        .flat_map(|win| public_win_rows(win, items))
         .collect();
-    if recommendations.public.builds.is_empty() {
-        public.push(insufficient_sample(
-            recommendations.public.analyzed,
-            &translate("partidas públicas coletadas deste modo"),
-        ));
+    if let Some(found) = found_row(
+        recommendations.public_wins.len(),
+        PUBLIC_WINS_SHOWN,
+        &translate(
+            "A coleta em segundo plano ainda não gravou mais vitórias do herói neste modo e patch.",
+        ),
+    ) {
+        public.push(found);
     }
     public.push(RowContent::new(
         Level::Info,
@@ -225,6 +228,123 @@ fn ready_content(
         pro,
         public,
         popularity: popularity_rows(recommendations, items, redactor),
+    }
+}
+
+/// Linhas de uma vitória pública: a partida, com a data e o rank médio, e a
+/// build real.
+fn public_win_rows(win: &PublicWin, items: &ItemCatalog) -> Vec<RowContent> {
+    let mut details = Vec::new();
+    if let Some(start_time) = win.start_time {
+        details.push(format_date(start_time));
+    }
+    if let Some(rank) = win.avg_rank_tier.and_then(rank_label) {
+        details.push(translate_with("rank médio {}", &[&rank]));
+    }
+    win_rows(
+        &translate("Vitória em partida pública"),
+        &details.join(" · "),
+        &win.build,
+        items,
+    )
+}
+
+/// Linhas de uma vitória: o cabeçalho da partida, o inventário final (com a
+/// mochila e o neutro) e a ordem de compra completa, como o jogador fez.
+pub fn win_rows(
+    heading: &str,
+    detail: &str,
+    build: &PlayerBuild,
+    items: &ItemCatalog,
+) -> Vec<RowContent> {
+    let names = |list: &[String]| -> String {
+        list.iter()
+            .map(|item| items.display_name(item))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let inventory = if build.inventory.is_empty() {
+        translate("Inventário final vazio")
+    } else {
+        translate_with("Inventário final: {}", &[&names(&build.inventory)])
+    };
+    let backpack = if build.backpack.is_empty() {
+        translate("Mochila vazia")
+    } else {
+        translate_with("Mochila: {}", &[&names(&build.backpack)])
+    };
+    let neutral = match (&build.neutral, &build.neutral_enhancement) {
+        (Some(neutral), Some(enhancement)) => translate_with(
+            "Neutro: {} + {}",
+            &[items.display_name(neutral), items.display_name(enhancement)],
+        ),
+        (Some(neutral), None) => translate_with("Neutro: {}", &[items.display_name(neutral)]),
+        (None, Some(enhancement)) => translate_with(
+            "Aprimoramento neutro: {}",
+            &[items.display_name(enhancement)],
+        ),
+        (None, None) => translate("Sem item neutro"),
+    };
+    let purchases = match &build.purchases {
+        Some(purchases) if !purchases.is_empty() => RowContent::new(
+            Level::Info,
+            &translate("Ordem de compra"),
+            &purchases
+                .iter()
+                .map(|purchase| {
+                    format!(
+                        "{} ({})",
+                        items.display_name(&purchase.item),
+                        purchase_time(purchase.time)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" → "),
+        ),
+        _ => RowContent::new(
+            Level::Info,
+            &translate("Sem ordem de compra"),
+            &translate(
+                "A partida não foi analisada pelo OpenDota; só o inventário final está disponível.",
+            ),
+        ),
+    };
+    vec![
+        RowContent::new(Level::Info, heading, detail),
+        RowContent::new(Level::Info, &inventory, &format!("{backpack} · {neutral}")),
+        purchases,
+    ]
+}
+
+/// Linha com quantas vitórias recentes foram encontradas, quando são menos
+/// que as `shown` mostradas; `None` quando a lista está completa.
+pub fn found_row(found: usize, shown: usize, explanation: &str) -> Option<RowContent> {
+    let title = match found {
+        _ if found >= shown => return None,
+        0 => translate("Nenhuma vitória recente encontrada"),
+        1 => translate("1 vitória recente encontrada"),
+        _ => translate_with("{} vitórias recentes encontradas", &[&found.to_string()]),
+    };
+    Some(RowContent::new(Level::Info, &title, explanation))
+}
+
+/// Medalha do rank médio (`avg_rank_tier` do OpenDota: a dezena é a medalha,
+/// de Arauto a Imortal, e a unidade, as estrelas). `None` fora da escala.
+pub fn rank_label(tier: u32) -> Option<String> {
+    let medal = match tier / 10 {
+        1 => translate("Arauto"),
+        2 => translate("Guardião"),
+        3 => translate("Cruzado"),
+        4 => translate("Arconte"),
+        5 => translate("Lenda"),
+        6 => translate("Ancestral"),
+        7 => translate("Divino"),
+        8 => return Some(translate("Imortal")),
+        _ => return None,
+    };
+    match tier % 10 {
+        stars @ 1..=5 => Some(format!("{medal} {stars}")),
+        _ => Some(medal),
     }
 }
 

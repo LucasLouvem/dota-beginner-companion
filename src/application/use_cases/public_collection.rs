@@ -1,16 +1,14 @@
 //! Coleta de partidas públicas em segundo plano. Cada ciclo lê uma amostra de
 //! `/publicMatches` a partir do cursor, busca os detalhes das partidas de
-//! Escolha Livre e Turbo entre jogadores e grava a build de cada jogador com
-//! dados suficientes. A coleta só usa o orçamento da categoria dela.
+//! Escolha Livre e Turbo entre jogadores e grava a build real de cada
+//! vencedor. A coleta só usa o orçamento da categoria dela.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::application::ports::{
-    CallCategory, ProviderError, PublicBuild, StatsQuery, StorageError, StorageFailureKind,
+    CallCategory, ProviderError, PublicWin, StatsQuery, StorageError, StorageFailureKind,
 };
-use crate::domain::builds::build_from_match;
-use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::{MatchDetails, PublicMatchSummary, collected_mode};
 
 use super::current_patch::load_current_patch;
@@ -32,8 +30,8 @@ pub enum CycleOutcome {
         listed: usize,
         /// Partidas de Escolha Livre ou Turbo entre jogadores.
         accepted: usize,
-        /// Builds gravadas.
-        builds: usize,
+        /// Vitórias gravadas.
+        wins: usize,
         /// A amostra chegou a partidas de outro patch, e a coleta volta para
         /// as mais recentes.
         restarted: bool,
@@ -45,20 +43,19 @@ pub enum CycleOutcome {
     StorageFailed(StorageError),
 }
 
-/// Builds dos jogadores de uma partida pública: só os do patch atual (do
-/// jogador ou da partida), com resultado e inventário, que formam build.
-/// Devolve também se algum jogador era de outro patch.
-pub fn public_builds(
+/// Vitórias de uma partida pública: os vencedores do patch atual (do
+/// jogador ou da partida) que têm build. Devolve também se algum jogador era
+/// de outro patch.
+pub fn public_wins(
     details: &MatchDetails,
     summary: &PublicMatchSummary,
-    items: &ItemCatalog,
     patch_id: u32,
-) -> (Vec<PublicBuild>, bool) {
+) -> (Vec<PublicWin>, bool) {
     let Some(game_mode) = summary.game_mode else {
         return (Vec::new(), false);
     };
     let mut other_patch = false;
-    let builds = details
+    let wins = details
         .players
         .iter()
         .filter_map(|player| {
@@ -67,21 +64,21 @@ pub fn public_builds(
                 other_patch = true;
                 return None;
             }
-            let input = player.build_input()?;
-            let build = build_from_match(&input, items)?;
-            Some(PublicBuild {
+            if player.won != Some(true) {
+                return None;
+            }
+            Some(PublicWin {
                 match_id: details.match_id,
                 hero_id: player.hero_id,
                 game_mode,
                 patch_id,
                 start_time: details.start_time.or(summary.start_time),
                 avg_rank_tier: summary.avg_rank_tier,
-                won: input.won,
-                build,
+                build: player.build.clone()?,
             })
         })
         .collect();
-    (builds, other_patch)
+    (wins, other_patch)
 }
 
 /// Um ciclo da coleta para o patch `patch_id`.
@@ -120,14 +117,14 @@ pub async fn collect_once(sources: &ExternalSources, patch_id: u32) -> CycleOutc
             // Partida que não veio é pulada; o cursor avança mesmo assim.
             Err(_) => None,
         };
-        let (builds, other_patch) = details
-            .map(|details| public_builds(&details, summary, &sources.items, patch_id))
+        let (wins, other_patch) = details
+            .map(|details| public_wins(&details, summary, patch_id))
             .unwrap_or_default();
         reached_other_patch |= other_patch;
-        stored += builds.len();
+        stored += wins.len();
         let store = Arc::clone(&sources.store);
         let match_id = summary.match_id;
-        if let Err(storage_error) = blocking(move || store.save_match(&builds, match_id)).await {
+        if let Err(storage_error) = blocking(move || store.save_match(&wins, match_id)).await {
             return CycleOutcome::StorageFailed(storage_error);
         }
     }
@@ -142,13 +139,13 @@ pub async fn collect_once(sources: &ExternalSources, patch_id: u32) -> CycleOutc
     CycleOutcome::Collected {
         listed: summaries.len(),
         accepted,
-        builds: stored,
+        wins: stored,
         restarted,
     }
 }
 
 /// Coleta enquanto o aplicativo estiver aberto: confere o patch atual,
-/// apaga builds de outros patches quando ele muda e roda os ciclos, com
+/// apaga as vitórias de outros patches quando ele muda e roda os ciclos, com
 /// esperas depois de orçamento esgotado ou falha. Termina só com o runtime.
 pub async fn run_collection(sources: ExternalSources) {
     let mut purged_for: Option<u32> = None;
@@ -171,11 +168,11 @@ pub async fn run_collection(sources: ExternalSources) {
             let patch_id = patch.id;
             match blocking(move || store.purge_other_patches(patch_id)).await {
                 Ok(removed) => {
-                    tracing::debug!(patch_id, removed, "removed public builds of other patches");
+                    tracing::debug!(patch_id, removed, "removed public wins of other patches");
                     purged_for = Some(patch.id);
                 }
                 Err(storage_error) => {
-                    tracing::warn!(error = %storage_error, "could not purge old public builds");
+                    tracing::warn!(error = %storage_error, "could not purge old public wins");
                 }
             }
         }

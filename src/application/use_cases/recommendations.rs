@@ -1,13 +1,14 @@
 //! Recomendações de itens e habilidades para um herói, modo e patch: builds
-//! de partidas profissionais, builds de partidas públicas coletadas e a
-//! popularidade de itens por fase.
+//! de partidas profissionais, as vitórias públicas coletadas mais recentes,
+//! com a build real, e a popularidade de itens por fase.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::application::ports::{CallCategory, StatsQuery, StorageError, StorageFailureKind};
+use crate::application::ports::{
+    CallCategory, PublicWin, StatsQuery, StorageError, StorageFailureKind,
+};
 use crate::application::state::{MatchStatus, ModeState};
-use crate::domain::builds::{BuildRanking, MIN_SAMPLE, rank_builds};
 use crate::domain::game::{GameMode, HeroPick};
 use crate::domain::match_data::{ItemPopularity, source_game_modes};
 use crate::domain::patch::Patch;
@@ -17,8 +18,8 @@ use super::fallback::{Sourced, load_with_fallback};
 use super::pro_builds::{ProBuildLimits, ProBuilds, load_pro_builds};
 use super::recommendation_request::RecommendationKey;
 
-/// Builds públicas mostradas.
-pub const PUBLIC_BUILDS_SHOWN: usize = 5;
+/// Vitórias públicas mostradas.
+pub const PUBLIC_WINS_SHOWN: usize = 5;
 /// Validade da popularidade de itens no cache.
 pub const POPULARITY_TTL: Duration = Duration::from_secs(6 * 3600);
 
@@ -28,8 +29,9 @@ pub struct Recommendations {
     pub key: RecommendationKey,
     pub patch: Patch,
     pub pro: ProBuilds,
-    pub public: BuildRanking,
-    /// Falha ao ler as builds públicas guardadas.
+    /// Vitórias públicas do modo, da mais recente para a mais antiga.
+    pub public_wins: Vec<PublicWin>,
+    /// Falha ao ler as vitórias públicas guardadas.
     pub public_error: Option<StorageError>,
     pub popularity: Sourced<ItemPopularity>,
     pub loaded_at: SystemTime,
@@ -85,18 +87,20 @@ pub async fn load_recommendations(
     let store = Arc::clone(&sources.store);
     let (hero_id, patch_id) = (key.hero_id, key.patch_id);
     let game_modes = source_game_modes(key.mode);
-    let stored = tokio::task::spawn_blocking(move || store.builds(hero_id, game_modes, patch_id))
-        .await
-        .unwrap_or_else(|join_error| {
-            Err(StorageError::Operation {
-                operation: "ler as builds públicas",
-                kind: StorageFailureKind::Other,
-                source: Arc::new(join_error),
-            })
-        });
-    let (public, public_error) = match stored {
-        Ok(builds) => (rank_builds(builds, MIN_SAMPLE, PUBLIC_BUILDS_SHOWN), None),
-        Err(storage_error) => (BuildRanking::default(), Some(storage_error)),
+    let stored = tokio::task::spawn_blocking(move || {
+        store.recent_wins(hero_id, game_modes, patch_id, PUBLIC_WINS_SHOWN)
+    })
+    .await
+    .unwrap_or_else(|join_error| {
+        Err(StorageError::Operation {
+            operation: "ler as builds públicas",
+            kind: StorageFailureKind::Other,
+            source: Arc::new(join_error),
+        })
+    });
+    let (public_wins, public_error) = match stored {
+        Ok(wins) => (wins, None),
+        Err(storage_error) => (Vec::new(), Some(storage_error)),
     };
 
     let query = StatsQuery::ItemPopularity {
@@ -124,7 +128,7 @@ pub async fn load_recommendations(
         key,
         patch,
         pro,
-        public,
+        public_wins,
         public_error,
         popularity,
         loaded_at: now,

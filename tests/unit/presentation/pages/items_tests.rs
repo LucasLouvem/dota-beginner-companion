@@ -6,7 +6,7 @@ use crate::application::use_cases::recommendation_request::RecommendationKey;
 use crate::domain::builds::BuildKey;
 use crate::domain::hero_catalog::{AttackType, HeroInfo, PrimaryAttribute};
 use crate::domain::item_catalog::ItemInfo;
-use crate::test_support::{pro_builds as pro, recommendations};
+use crate::test_support::{pro_builds as pro, public_win, recommendations, zeus_build};
 use std::sync::Arc;
 
 fn heroes() -> HeroCatalog {
@@ -34,6 +34,11 @@ fn items() -> ItemCatalog {
         item(2, "item_desolator", "Desolator"),
         item(3, "item_satanic", "Satanic"),
         item(4, "item_branches", "Iron Branch"),
+        item(5, "item_blink", "Blink Dagger"),
+        item(6, "item_smoke_of_deceit", "Smoke of Deceit"),
+        item(7, "item_partisans_brand", "Partisan's Brand"),
+        item(8, "item_enhancement_greedy", "Greedy"),
+        item(9, "item_tango", "Tango"),
     ])
 }
 
@@ -58,22 +63,6 @@ fn ordered_build(wins: usize, matches: usize) -> RankedBuild {
         matches,
         wins,
         average_times: Some(vec![900, 1300, 1800]),
-    }
-}
-
-fn unordered_build(wins: usize, matches: usize) -> RankedBuild {
-    RankedBuild {
-        key: BuildKey {
-            evidence: BuildEvidence::FinalInventoryUnordered,
-            items: vec![
-                "item_black_king_bar".into(),
-                "item_satanic".into(),
-                "item_unknown".into(),
-            ],
-        },
-        matches,
-        wins,
-        average_times: None,
     }
 }
 
@@ -167,7 +156,7 @@ fn sample_below_minimum_is_shown_with_the_analyzed_count() {
             "Nenhuma build com pelo menos 10 partidas entre 30 partidas profissionais válidas."
         )
     );
-    assert_eq!(ready.public[0].title, "Amostra insuficiente");
+    assert_eq!(ready.public[0].title, "Nenhuma vitória recente encontrada");
 }
 
 #[test]
@@ -184,24 +173,95 @@ fn stale_professional_data_is_marked_as_old() {
 }
 
 #[test]
-fn public_builds_keep_the_ranking_order_and_say_when_there_is_no_order() {
+fn public_wins_show_the_real_build_of_each_match_and_how_many_were_found() {
     let ready = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::Turbo,
         pro(vec![], 0, None),
-        vec![unordered_build(8, 10), ordered_build(6, 10)],
+        vec![public_win(2, zeus_build()), public_win(1, zeus_build())],
     ))));
 
+    assert_eq!(ready.public[0].title, "Vitória em partida pública");
+    assert!(
+        ready.public[0].subtitle.ends_with("rank médio Lenda 1"),
+        "{:?}",
+        ready.public[0]
+    );
     assert_eq!(
-        titles(&ready.public[..2]),
+        ready.public[1].title,
+        "Inventário final: Blink Dagger, Black King Bar"
+    );
+    assert_eq!(ready.public[3].title, "Vitória em partida pública");
+    assert_eq!(
+        ready.public[6],
+        RowContent::new(
+            Level::Info,
+            "2 vitórias recentes encontradas",
+            "A coleta em segundo plano ainda não gravou mais vitórias do herói neste modo e patch."
+        )
+    );
+    assert!(
+        ready.public[7]
+            .title
+            .starts_with("Fonte: partidas públicas")
+    );
+}
+
+#[test]
+fn win_rows_show_inventory_backpack_neutral_and_every_purchase_with_its_time() {
+    let rows = win_rows("Partida", "detalhe", &zeus_build(), &items());
+
+    assert_eq!(
+        rows,
         [
-            "Black King Bar + Satanic + item_unknown",
-            "Black King Bar → Desolator → Satanic"
+            RowContent::new(Level::Info, "Partida", "detalhe"),
+            RowContent::new(
+                Level::Info,
+                "Inventário final: Blink Dagger, Black King Bar",
+                "Mochila: Smoke of Deceit · Neutro: Partisan's Brand + Greedy"
+            ),
+            RowContent::new(
+                Level::Info,
+                "Ordem de compra",
+                "Tango (antes do início) → Blink Dagger (12:34)"
+            ),
         ]
     );
+}
+
+#[test]
+fn win_rows_without_purchases_or_extra_slots_say_so() {
+    let build = PlayerBuild {
+        inventory: vec!["item_unknown".into()],
+        ..PlayerBuild::default()
+    };
+
+    let rows = win_rows("Partida", "", &build, &items());
+
+    assert_eq!(rows[1].title, "Inventário final: item_unknown");
+    assert_eq!(rows[1].subtitle, "Mochila vazia · Sem item neutro");
+    assert_eq!(rows[2].title, "Sem ordem de compra");
+}
+
+#[test]
+fn found_row_only_appears_when_fewer_wins_than_shown() {
+    assert_eq!(found_row(3, 3, "x"), None);
     assert_eq!(
-        ready.public[0].subtitle,
-        "Taxa de vitória observada: 80% em 10 partidas · itens finais, sem ordem de compra"
+        found_row(0, 3, "x").unwrap().title,
+        "Nenhuma vitória recente encontrada"
     );
+    assert_eq!(
+        found_row(1, 3, "x").unwrap().title,
+        "1 vitória recente encontrada"
+    );
+}
+
+#[test]
+fn rank_label_reads_medal_and_stars() {
+    assert_eq!(rank_label(51).as_deref(), Some("Lenda 1"));
+    assert_eq!(rank_label(10).as_deref(), Some("Arauto"));
+    assert_eq!(rank_label(80).as_deref(), Some("Imortal"));
+    assert_eq!(rank_label(0), None);
+    assert_eq!(rank_label(95), None);
 }
 
 #[test]

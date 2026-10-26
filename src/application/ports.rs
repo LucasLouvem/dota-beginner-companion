@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::domain::builds::MatchBuild;
+use crate::domain::builds::PlayerBuild;
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
 use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
@@ -532,39 +532,41 @@ pub trait StatsProvider: Send + Sync {
     fn decode_public_matches(&self, raw: &str) -> Result<Vec<PublicMatchSummary>, ProviderError>;
 }
 
-/// Build de um jogador numa partida pública, como é guardada.
+/// Build real de um vencedor numa partida pública, como é guardada.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublicBuild {
+pub struct PublicWin {
     pub match_id: u64,
     pub hero_id: u32,
     /// `game_mode` do Dota da partida.
     pub game_mode: u32,
     pub patch_id: u32,
     pub start_time: Option<i64>,
-    /// Rank médio da partida, guardado para um filtro futuro.
+    /// Rank médio da partida.
     pub avg_rank_tier: Option<u32>,
-    pub won: bool,
-    pub build: MatchBuild,
+    pub build: PlayerBuild,
 }
 
-/// Builds de partidas públicas e o ponto em que a coleta parou.
+/// Vitórias de partidas públicas e o ponto em que a coleta parou.
 pub trait PublicBuildStore: Send + Sync {
-    /// Grava as builds de uma partida e o cursor da coleta numa única
+    /// Grava as vitórias de uma partida e o cursor da coleta numa única
     /// transação, para um erro nunca perder o ponto nem gravar pela metade.
     /// Uma partida já gravada para o herói é ignorada.
-    fn save_match(&self, builds: &[PublicBuild], cursor: u64) -> Result<(), StorageError>;
+    fn save_match(&self, wins: &[PublicWin], cursor: u64) -> Result<(), StorageError>;
     /// ID usado como `less_than_match_id` na próxima consulta.
     fn cursor(&self) -> Result<Option<u64>, StorageError>;
     /// Volta a coleta para as partidas mais recentes.
     fn reset_cursor(&self) -> Result<(), StorageError>;
-    /// Builds do herói nas partidas com um dos `game_modes`, no patch.
-    fn builds(
+    /// Até `limit` vitórias do herói nas partidas com um dos `game_modes`, no
+    /// patch, da mais recente para a mais antiga (por `start_time`, depois
+    /// pelo ID da partida).
+    fn recent_wins(
         &self,
         hero_id: u32,
         game_modes: &[u32],
         patch_id: u32,
-    ) -> Result<Vec<(MatchBuild, bool)>, StorageError>;
-    /// Apaga as builds de outros patches; devolve quantas saíram.
+        limit: usize,
+    ) -> Result<Vec<PublicWin>, StorageError>;
+    /// Apaga as vitórias de outros patches; devolve quantas saíram.
     fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError>;
 }
 

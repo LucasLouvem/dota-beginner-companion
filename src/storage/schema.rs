@@ -12,10 +12,10 @@ use rusqlite::{Connection, ErrorCode};
 use crate::application::ports::{SharedError, StorageError, StorageFailureKind};
 
 /// Versão do schema gravada em `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Migrações em ordem: a de índice `n` leva da versão `n` para a `n + 1`.
-const MIGRATIONS: [&str; 2] = [
+const MIGRATIONS: [&str; 3] = [
     // 1: cache com prazo de validade.
     "CREATE TABLE cache (
         key TEXT PRIMARY KEY NOT NULL,
@@ -49,6 +49,26 @@ const MIGRATIONS: [&str; 2] = [
         id INTEGER PRIMARY KEY CHECK (id = 1),
         less_than_match_id INTEGER NOT NULL
     );",
+    // 3: as builds públicas passam a ser a build real dos vencedores. As
+    // linhas da versão 2 (três itens por partida) não têm esses dados e são
+    // descartadas; o cursor continua valendo.
+    "DROP TABLE public_builds;
+    CREATE TABLE public_wins (
+        match_id INTEGER NOT NULL,
+        hero_id INTEGER NOT NULL,
+        game_mode INTEGER NOT NULL,
+        patch_id INTEGER NOT NULL,
+        start_time INTEGER,
+        avg_rank_tier INTEGER,
+        inventory TEXT NOT NULL,
+        backpack TEXT NOT NULL,
+        neutral TEXT,
+        neutral_enhancement TEXT,
+        purchases TEXT,
+        PRIMARY KEY (match_id, hero_id)
+    );
+    CREATE INDEX public_wins_by_hero
+        ON public_wins (hero_id, patch_id, game_mode, start_time);",
 ];
 
 /// O banco foi criado por uma versão mais nova do aplicativo.

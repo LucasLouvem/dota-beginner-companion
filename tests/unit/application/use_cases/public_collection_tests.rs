@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit, CallBudget};
-use crate::domain::builds::{BuildEvidence, PlayerBuild, Purchase};
-use crate::domain::item_catalog::ItemInfo;
+use crate::domain::builds::{PlayerBuild, Purchase};
+use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::MatchPlayer;
 use crate::test_support::{
     FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
@@ -32,21 +32,6 @@ impl CallBudget for CollectionBudget {
         }
         Ok(())
     }
-}
-
-fn items() -> Arc<ItemCatalog> {
-    let major = |id: u32, name: &str| ItemInfo {
-        id,
-        name: name.into(),
-        display_name: name.into(),
-        cost: Some(4000),
-        components: vec!["item_component".into()],
-    };
-    Arc::new(ItemCatalog::new(vec![
-        major(1, "item_black_king_bar"),
-        major(2, "item_desolator"),
-        major(3, "item_satanic"),
-    ]))
 }
 
 fn summary(match_id: u64, game_mode: u32, lobby_type: u32) -> PublicMatchSummary {
@@ -113,7 +98,7 @@ fn sources(
         budget,
         store,
         cache: Arc::new(MemoryCache::default()),
-        items: items(),
+        items: Arc::new(ItemCatalog::default()),
         embedded_patches: None,
     }
 }
@@ -154,7 +139,7 @@ fn sample_provider() -> Arc<FakeStatsProvider> {
 }
 
 #[tokio::test]
-async fn collects_builds_only_from_all_pick_and_turbo_between_players() {
+async fn collects_wins_only_from_all_pick_and_turbo_between_players() {
     let provider = sample_provider();
     let store = Arc::new(MemoryPublicBuildStore::default());
 
@@ -167,13 +152,13 @@ async fn collects_builds_only_from_all_pick_and_turbo_between_players() {
     let CycleOutcome::Collected {
         listed,
         accepted,
-        builds,
+        wins,
         restarted,
     } = outcome
     else {
         panic!("esperava ciclo completo: {outcome:?}");
     };
-    assert_eq!((listed, accepted, builds), (5, 3, 2));
+    assert_eq!((listed, accepted, wins), (5, 3, 2));
     assert_eq!(
         provider.fetches(),
         4,
@@ -209,7 +194,7 @@ async fn listing_starts_from_the_saved_cursor() {
         matches!(
             outcome,
             CycleOutcome::Collected {
-                builds: 1,
+                wins: 1,
                 restarted: false,
                 ..
             }
@@ -318,49 +303,49 @@ async fn empty_listing_restarts_from_the_newest_matches() {
 }
 
 #[test]
-fn analyzed_player_gets_an_ordered_build_and_the_rest_an_unordered_one() {
+fn only_winners_with_a_build_are_kept_with_the_whole_build() {
     let analyzed = MatchPlayer {
         build: Some(PlayerBuild {
-            purchases: Some(vec![
-                Purchase {
-                    item: "item_desolator".into(),
-                    time: 700,
-                },
-                Purchase {
-                    item: "item_black_king_bar".into(),
-                    time: 900,
-                },
-                Purchase {
-                    item: "item_satanic".into(),
-                    time: 1500,
-                },
-            ]),
+            inventory: vec!["item_blink".into()],
+            purchases: Some(vec![Purchase {
+                item: "item_tango".into(),
+                time: -89,
+            }]),
             ..PlayerBuild::default()
         }),
         ..player(22, Some(PATCH))
     };
-    let match_details = details(1, vec![analyzed, player(49, Some(PATCH))]);
-
-    let (builds, other_patch) = public_builds(&match_details, &summary(1, 23, 0), &items(), PATCH);
-
-    let evidence: Vec<BuildEvidence> = builds
-        .iter()
-        .map(|build| build.build.key.evidence)
-        .collect();
-    assert_eq!(
-        evidence,
-        [
-            BuildEvidence::OrderedPurchaseLog,
-            BuildEvidence::FinalInventoryUnordered
-        ]
+    let match_details = details(
+        1,
+        vec![
+            analyzed.clone(),
+            MatchPlayer {
+                won: Some(false),
+                ..player(49, Some(PATCH))
+            },
+            MatchPlayer {
+                build: None,
+                ..player(50, Some(PATCH))
+            },
+        ],
     );
-    assert_eq!(builds[0].avg_rank_tier, Some(51));
-    assert_eq!(builds[0].start_time, Some(1_792_970_100));
+
+    let (wins, other_patch) = public_wins(&match_details, &summary(1, 23, 0), PATCH);
+
+    assert_eq!(
+        wins.len(),
+        1,
+        "o perdedor e o jogador sem build ficam de fora"
+    );
+    assert_eq!(wins[0].hero_id, 22);
+    assert_eq!(Some(&wins[0].build), analyzed.build.as_ref());
+    assert_eq!(wins[0].avg_rank_tier, Some(51));
+    assert_eq!(wins[0].start_time, Some(1_792_970_100));
     assert!(!other_patch);
 }
 
 #[test]
-fn players_without_patch_result_or_items_are_left_out() {
+fn players_without_patch_or_result_are_left_out() {
     let match_details = details(
         1,
         vec![
@@ -379,9 +364,10 @@ fn players_without_patch_result_or_items_are_left_out() {
         ],
     );
 
-    let (builds, other_patch) = public_builds(&match_details, &summary(1, 23, 0), &items(), PATCH);
+    let (wins, other_patch) = public_wins(&match_details, &summary(1, 23, 0), PATCH);
 
-    assert!(builds.is_empty());
+    let heroes: Vec<u32> = wins.iter().map(|win| win.hero_id).collect();
+    assert_eq!(heroes, [3], "um único item já é uma build");
     assert!(!other_patch, "jogador sem patch não conta como outro patch");
 }
 
@@ -392,7 +378,7 @@ fn match_patch_is_used_when_the_player_has_none() {
         ..details(1, vec![player(22, None)])
     };
 
-    let (builds, _) = public_builds(&match_details, &summary(1, 23, 0), &items(), PATCH);
+    let (wins, _) = public_wins(&match_details, &summary(1, 23, 0), PATCH);
 
-    assert_eq!(builds.len(), 1);
+    assert_eq!(wins.len(), 1);
 }

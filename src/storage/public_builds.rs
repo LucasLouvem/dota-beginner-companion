@@ -1,4 +1,5 @@
-//! Builds de partidas públicas e cursor da coleta, gravados em SQLite.
+//! Builds reais de vencedores de partidas públicas e cursor da coleta,
+//! gravados em SQLite.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -6,8 +7,10 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
-use crate::application::ports::{PublicBuild, PublicBuildStore, StorageError};
-use crate::domain::builds::{BuildEvidence, BuildKey, MatchBuild};
+use serde_json::{Value, json};
+
+use crate::application::ports::{PublicBuildStore, PublicWin, StorageError};
+use crate::domain::builds::{PlayerBuild, Purchase};
 
 use super::schema::{open_database, sqlite_kind};
 
@@ -41,50 +44,40 @@ impl SqlitePublicBuildStore {
     }
 }
 
-/// Nome da evidência gravado no banco.
-fn evidence_name(evidence: BuildEvidence) -> &'static str {
-    match evidence {
-        BuildEvidence::OrderedPurchaseLog => "ordered_purchase_log",
-        BuildEvidence::FinalInventoryUnordered => "final_inventory_unordered",
-    }
-}
-
-fn evidence_from(name: &str) -> Option<BuildEvidence> {
-    match name {
-        "ordered_purchase_log" => Some(BuildEvidence::OrderedPurchaseLog),
-        "final_inventory_unordered" => Some(BuildEvidence::FinalInventoryUnordered),
-        _ => None,
-    }
-}
-
 impl PublicBuildStore for SqlitePublicBuildStore {
-    fn save_match(&self, builds: &[PublicBuild], cursor: u64) -> Result<(), StorageError> {
+    fn save_match(&self, wins: &[PublicWin], cursor: u64) -> Result<(), StorageError> {
         let save_error = |sqlite_error| operation_error("gravar as builds públicas", sqlite_error);
         let mut connection = self.connection();
         let transaction = connection.transaction().map_err(save_error)?;
-        for public in builds {
-            let items = serde_json::to_string(&public.build.key.items)
-                .expect("uma lista de textos sempre vira JSON");
-            let times = public.build.times.as_ref().map(|times| {
-                serde_json::to_string(times).expect("uma lista de números sempre vira JSON")
+        for win in wins {
+            let build = &win.build;
+            let purchases = build.purchases.as_ref().map(|purchases| {
+                Value::Array(
+                    purchases
+                        .iter()
+                        .map(|purchase| json!({"item": purchase.item, "time": purchase.time}))
+                        .collect(),
+                )
+                .to_string()
             });
             transaction
                 .execute(
-                    "INSERT OR IGNORE INTO public_builds
+                    "INSERT OR IGNORE INTO public_wins
                      (match_id, hero_id, game_mode, patch_id, start_time, avg_rank_tier,
-                      won, evidence, items, times)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                      inventory, backpack, neutral, neutral_enhancement, purchases)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
-                        to_sql_id(public.match_id),
-                        public.hero_id,
-                        public.game_mode,
-                        public.patch_id,
-                        public.start_time,
-                        public.avg_rank_tier,
-                        public.won,
-                        evidence_name(public.build.key.evidence),
-                        items,
-                        times,
+                        to_sql_id(win.match_id),
+                        win.hero_id,
+                        win.game_mode,
+                        win.patch_id,
+                        win.start_time,
+                        win.avg_rank_tier,
+                        json!(build.inventory).to_string(),
+                        json!(build.backpack).to_string(),
+                        build.neutral,
+                        build.neutral_enhancement,
+                        purchases,
                     ],
                 )
                 .map_err(save_error)?;
@@ -118,70 +111,120 @@ impl PublicBuildStore for SqlitePublicBuildStore {
             .map_err(|sqlite_error| operation_error("reiniciar o cursor da coleta", sqlite_error))
     }
 
-    fn builds(
+    fn recent_wins(
         &self,
         hero_id: u32,
         game_modes: &[u32],
         patch_id: u32,
-    ) -> Result<Vec<(MatchBuild, bool)>, StorageError> {
+        limit: usize,
+    ) -> Result<Vec<PublicWin>, StorageError> {
         let read_error = |sqlite_error| operation_error("ler as builds públicas", sqlite_error);
-        if game_modes.is_empty() {
+        if game_modes.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
         let placeholders = vec!["?"; game_modes.len()].join(", ");
+        // Linhas que não se leem como build são puladas, então a consulta
+        // não usa LIMIT: o limite vale para as vitórias válidas.
         let sql = format!(
-            "SELECT evidence, items, times, won FROM public_builds
-             WHERE hero_id = ? AND patch_id = ? AND game_mode IN ({placeholders})"
+            "SELECT match_id, game_mode, start_time, avg_rank_tier, inventory, backpack,
+                    neutral, neutral_enhancement, purchases
+             FROM public_wins
+             WHERE hero_id = ? AND patch_id = ? AND game_mode IN ({placeholders})
+             ORDER BY start_time IS NULL, start_time DESC, match_id DESC"
         );
         let connection = self.connection();
         let mut statement = connection.prepare(&sql).map_err(read_error)?;
-        let values = [hero_id, patch_id]
+        let values = [i64::from(hero_id), i64::from(patch_id)]
             .into_iter()
-            .chain(game_modes.iter().copied());
-        let rows = statement
-            .query_map(params_from_iter(values), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, bool>(3)?,
-                ))
-            })
+            .chain(game_modes.iter().map(|mode| i64::from(*mode)));
+        let mut rows = statement
+            .query(params_from_iter(values))
             .map_err(read_error)?;
-        let mut builds = Vec::new();
-        for row in rows {
-            let (evidence, items, times, won) = row.map_err(read_error)?;
+        let mut wins = Vec::new();
+        while wins.len() < limit
+            && let Some(row) = rows.next().map_err(read_error)?
+        {
+            let stored = StoredWin {
+                match_id: row.get(0).map_err(read_error)?,
+                game_mode: row.get(1).map_err(read_error)?,
+                start_time: row.get(2).map_err(read_error)?,
+                avg_rank_tier: row.get(3).map_err(read_error)?,
+                inventory: row.get(4).map_err(read_error)?,
+                backpack: row.get(5).map_err(read_error)?,
+                neutral: row.get(6).map_err(read_error)?,
+                neutral_enhancement: row.get(7).map_err(read_error)?,
+                purchases: row.get(8).map_err(read_error)?,
+            };
             // Linha que não se lê como build é ignorada, em vez de invalidar
             // todas as outras.
-            let Some(build) = decode_build(&evidence, &items, times.as_deref()) else {
-                continue;
-            };
-            builds.push((build, won));
+            if let Some(win) = stored.decode(hero_id, patch_id) {
+                wins.push(win);
+            }
         }
-        Ok(builds)
+        Ok(wins)
     }
 
     fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError> {
         self.connection()
             .execute(
-                "DELETE FROM public_builds WHERE patch_id <> ?1",
+                "DELETE FROM public_wins WHERE patch_id <> ?1",
                 params![patch_id],
             )
             .map_err(|sqlite_error| operation_error("limpar as builds públicas", sqlite_error))
     }
 }
 
-fn decode_build(evidence: &str, items: &str, times: Option<&str>) -> Option<MatchBuild> {
-    Some(MatchBuild {
-        key: BuildKey {
-            evidence: evidence_from(evidence)?,
-            items: serde_json::from_str(items).ok()?,
-        },
-        times: match times {
-            Some(times) => Some(serde_json::from_str(times).ok()?),
+/// Colunas de uma vitória como estão no banco.
+struct StoredWin {
+    match_id: i64,
+    game_mode: u32,
+    start_time: Option<i64>,
+    avg_rank_tier: Option<u32>,
+    inventory: String,
+    backpack: String,
+    neutral: Option<String>,
+    neutral_enhancement: Option<String>,
+    purchases: Option<String>,
+}
+
+impl StoredWin {
+    fn decode(self, hero_id: u32, patch_id: u32) -> Option<PublicWin> {
+        let purchases = match self.purchases {
+            Some(purchases) => Some(decode_purchases(&purchases)?),
             None => None,
-        },
-    })
+        };
+        Some(PublicWin {
+            match_id: u64::try_from(self.match_id).ok()?,
+            hero_id,
+            game_mode: self.game_mode,
+            patch_id,
+            start_time: self.start_time,
+            avg_rank_tier: self.avg_rank_tier,
+            build: PlayerBuild {
+                inventory: serde_json::from_str(&self.inventory).ok()?,
+                backpack: serde_json::from_str(&self.backpack).ok()?,
+                neutral: self.neutral,
+                neutral_enhancement: self.neutral_enhancement,
+                purchases,
+            },
+        })
+    }
+}
+
+/// Lista de `{"item", "time"}`; qualquer registro fora desse formato
+/// invalida a lista inteira, para não mostrar uma ordem de compra pela
+/// metade.
+fn decode_purchases(raw: &str) -> Option<Vec<Purchase>> {
+    let entries: Vec<Value> = serde_json::from_str(raw).ok()?;
+    entries
+        .iter()
+        .map(|entry| {
+            Some(Purchase {
+                item: entry.get("item")?.as_str()?.to_owned(),
+                time: i32::try_from(entry.get("time")?.as_i64()?).ok()?,
+            })
+        })
+        .collect()
 }
 
 /// IDs de partida cabem em `i64` (o tipo inteiro do SQLite) por muitas
