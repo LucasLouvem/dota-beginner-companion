@@ -40,12 +40,12 @@ impl RecommendationTab {
     fn intro(self) -> String {
         match self {
             RecommendationTab::Items => translate(
-                "Builds reais das vitórias mais recentes do herói no modo da partida, como cada \\
-                 jogador fez: inventário final, mochila, item neutro e ordem de compra, com \\
+                "Builds reais das vitórias mais recentes do herói no modo da partida, como cada \
+                 jogador fez: inventário final, mochila, item neutro e ordem de compra, com \
                  dados do OpenDota.",
             ),
             RecommendationTab::Abilities => translate(
-                "Ordem em que as habilidades foram evoluídas em cada vitória profissional recente \\
+                "Ordem em que as habilidades foram evoluídas em cada vitória profissional recente \
                  do herói, com dados do OpenDota.",
             ),
             RecommendationTab::ProMatches => {
