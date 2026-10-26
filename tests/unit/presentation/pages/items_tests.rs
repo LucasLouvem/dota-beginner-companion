@@ -2,16 +2,12 @@
 //! sem widgets).
 
 use super::*;
-use crate::application::use_cases::fallback::Sourced;
-use crate::application::use_cases::pro_builds::ProBuilds;
 use crate::application::use_cases::recommendation_request::RecommendationKey;
-use crate::domain::builds::{BuildKey, BuildRanking};
+use crate::domain::builds::BuildKey;
 use crate::domain::hero_catalog::{AttackType, HeroInfo, PrimaryAttribute};
 use crate::domain::item_catalog::ItemInfo;
-use crate::domain::match_data::ItemPopularity;
-use crate::domain::patch::Patch;
-use std::collections::BTreeMap;
-use std::time::UNIX_EPOCH;
+use crate::test_support::{pro_builds as pro, recommendations};
+use std::sync::Arc;
 
 fn heroes() -> HeroCatalog {
     HeroCatalog::new(vec![HeroInfo {
@@ -78,56 +74,6 @@ fn unordered_build(wins: usize, matches: usize) -> RankedBuild {
         matches,
         wins,
         average_times: None,
-    }
-}
-
-fn pro(builds: Vec<RankedBuild>, valid_matches: usize, origin: Option<DataOrigin>) -> ProBuilds {
-    ProBuilds {
-        ranking: BuildRanking {
-            builds,
-            analyzed: valid_matches,
-        },
-        ability_order: None,
-        recent_matches: vec![],
-        examined: valid_matches,
-        valid_matches,
-        discarded: BTreeMap::new(),
-        stopped_by: None,
-        candidates_origin: origin,
-        error: None,
-        calls: 0,
-    }
-}
-
-fn recommendations(
-    mode: GameMode,
-    pro_builds: ProBuilds,
-    public: Vec<RankedBuild>,
-) -> Recommendations {
-    Recommendations {
-        key: key(mode),
-        patch: Patch {
-            id: 60,
-            name: "7.41".into(),
-        },
-        pro: pro_builds,
-        public: BuildRanking {
-            analyzed: public.iter().map(|build| build.matches).sum(),
-            builds: public,
-        },
-        public_error: None,
-        popularity: Sourced {
-            value: Some(ItemPopularity {
-                phases: vec![(
-                    PopularityPhase::Start,
-                    vec![("item_branches".into(), 189), ("item_satanic".into(), 3)],
-                )],
-            }),
-            origin: Some(DataOrigin::Stale),
-            fetched_at: Some(UNIX_EPOCH),
-            error: None,
-        },
-        loaded_at: UNIX_EPOCH,
     }
 }
 

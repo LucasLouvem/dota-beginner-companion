@@ -216,6 +216,14 @@ pub fn format_duration(total_secs: u32) -> String {
     }
 }
 
+/// Data no fuso local, como `25/10/2026`; vazia se o horário não for válido.
+pub fn format_date(unix_seconds: i64) -> String {
+    relm4::gtk::glib::DateTime::from_unix_local(unix_seconds)
+        .and_then(|local_time| local_time.format("%d/%m/%Y"))
+        .map(|formatted| formatted.to_string())
+        .unwrap_or_default()
+}
+
 /// "14:03:22 (há 5 s)" no fuso local.
 pub fn format_time(at: SystemTime) -> String {
     let secs = at

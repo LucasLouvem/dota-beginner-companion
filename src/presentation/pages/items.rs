@@ -1,14 +1,11 @@
-//! Tela "Itens": builds de partidas profissionais e públicas para o herói e
-//! o modo da partida, e a popularidade de itens por fase. Cada bloco diz a
-//! fonte, o patch, se os dados são antigos e o tamanho da amostra.
-
-use std::sync::Arc;
-
-use relm4::adw::prelude::*;
-use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
+//! Conteúdo da aba "Itens": builds de partidas profissionais e públicas para
+//! o herói e o modo da partida, e a popularidade de itens por fase. Cada
+//! bloco diz a fonte, o patch, se os dados são antigos e o tamanho da
+//! amostra. Também as linhas de estado compartilhadas pelas abas de
+//! recomendação.
 
 use crate::application::error::{Redactor, ToDiagnostic};
-use crate::application::state::{AppSnapshot, RecommendationStatus};
+use crate::application::state::RecommendationStatus;
 use crate::application::use_cases::fallback::DataOrigin;
 use crate::application::use_cases::recommendations::Recommendations;
 use crate::domain::builds::{BuildEvidence, MIN_SAMPLE, RankedBuild};
@@ -17,9 +14,7 @@ use crate::domain::hero_catalog::HeroCatalog;
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::PopularityPhase;
 use crate::presentation::i18n::{translate, translate_with};
-use crate::presentation::widgets::{
-    Level, RowContent, RowSection, boxed_list, format_duration, format_time, section_title,
-};
+use crate::presentation::widgets::{Level, RowContent, format_duration, format_time};
 
 use super::hero::mode_label;
 
@@ -36,215 +31,128 @@ pub struct ItemsContent {
     pub popularity: Vec<RowContent>,
 }
 
-/// Página Itens.
-pub struct ItemsPage {
-    heroes: Arc<HeroCatalog>,
-    items: Arc<ItemCatalog>,
-    recommendations: RecommendationStatus,
-    redactor: Redactor,
-}
-
-/// Mensagens recebidas pela página Itens.
-#[derive(Debug)]
-pub enum ItemsMessage {
-    Snapshot(Box<AppSnapshot>),
-}
-
-/// Dados para iniciar a página.
-pub struct ItemsPageInit {
-    pub heroes: Arc<HeroCatalog>,
-    pub items: Arc<ItemCatalog>,
-}
-
-/// Widgets da página, com o que cada lista mostra agora.
-pub struct ItemsWidgets {
-    header: RowSection,
-    notes: RowSection,
-    pro: RowSection,
-    public: RowSection,
-    popularity: RowSection,
-}
-
-impl Component for ItemsPage {
-    type Init = ItemsPageInit;
-    type Input = ItemsMessage;
-    type Output = ();
-    type CommandOutput = ();
-    type Root = gtk::ScrolledWindow;
-    type Widgets = ItemsWidgets;
-
-    fn init_root() -> Self::Root {
-        gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .build()
+impl ItemsContent {
+    /// Seções na ordem da aba.
+    pub fn into_sections(self) -> Vec<Vec<RowContent>> {
+        vec![
+            self.header,
+            self.notes,
+            self.pro,
+            self.public,
+            self.popularity,
+        ]
     }
+}
 
-    fn init(
-        init: Self::Init,
-        root: Self::Root,
-        _sender: ComponentSender<Self>,
-    ) -> ComponentParts<Self> {
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        content.set_margin_top(24);
-        content.set_margin_bottom(24);
-        content.set_margin_start(16);
-        content.set_margin_end(16);
+/// Nome de exibição do herói, ou o ID quando o catálogo não o conhece.
+pub fn hero_name(heroes: &HeroCatalog, hero_id: u32) -> String {
+    heroes.by_id(hero_id).map_or_else(
+        || translate_with("herói {}", &[&hero_id.to_string()]),
+        |hero| hero.display_name.clone(),
+    )
+}
 
-        let title = gtk::Label::new(Some(&translate("Itens")));
-        title.add_css_class("title-1");
-        title.set_xalign(0.0);
-        let intro = gtk::Label::new(Some(&translate(
-            "Builds observadas em partidas para o herói e o modo da partida, com dados do \
-             OpenDota. São sugestões estatísticas: cada build mostra a taxa de vitória \
-             observada e quantas partidas foram analisadas.",
-        )));
-        intro.set_wrap(true);
-        intro.set_xalign(0.0);
-        intro.add_css_class("dim-label");
-        content.append(&title);
-        content.append(&intro);
-
-        let section = |text: Option<&str>| {
-            if let Some(text) = text {
-                content.append(&section_title(&translate(text)));
-            }
-            let list = boxed_list();
-            content.append(&list);
-            RowSection::new(list)
-        };
-        let header = section(None);
-        let notes = section(None);
-        let pro = section(Some("Builds de partidas profissionais"));
-        let public = section(Some("Builds de partidas públicas"));
-        let popularity = section(Some("Itens mais comprados por fase (profissionais)"));
-
-        let clamp = adw::Clamp::builder()
-            .maximum_size(860)
-            .child(&content)
-            .build();
-        root.set_child(Some(&clamp));
-
-        let model = ItemsPage {
-            heroes: init.heroes,
-            items: init.items,
-            recommendations: RecommendationStatus::default(),
-            redactor: Redactor::default(),
-        };
-        let mut widgets = ItemsWidgets {
-            header,
-            notes,
-            pro,
-            public,
-            popularity,
-        };
-        model.render(&mut widgets);
-        ComponentParts { model, widgets }
-    }
-
-    fn update_with_view(
-        &mut self,
-        widgets: &mut Self::Widgets,
-        message: Self::Input,
-        _sender: ComponentSender<Self>,
-        _root: &Self::Root,
-    ) {
-        match message {
-            ItemsMessage::Snapshot(snapshot) => {
-                self.recommendations = snapshot.recommendations;
-                self.redactor = snapshot.redactor;
-            }
+/// Linhas do cabeçalho das abas de recomendação enquanto não há dados
+/// prontos; `None` quando as recomendações estão prontas.
+pub fn status_rows(
+    status: &RecommendationStatus,
+    heroes: &HeroCatalog,
+    redactor: &Redactor,
+) -> Option<Vec<RowContent>> {
+    match status {
+        RecommendationStatus::Unavailable => Some(vec![RowContent::new(
+            Level::Warning,
+            &translate("Recomendações indisponíveis"),
+            &translate(
+                "O banco local ou o cliente HTTP não puderam ser abertos; os detalhes estão no log.",
+            ),
+        )]),
+        RecommendationStatus::Idle => Some(vec![RowContent::new(
+            Level::Info,
+            &translate("Nenhum herói para recomendar"),
+            &translate("As recomendações aparecem quando o Dota informa o herói escolhido."),
+        )]),
+        RecommendationStatus::Loading { key } => Some(vec![RowContent::new(
+            Level::Info,
+            &translate_with(
+                "Carregando recomendações de {}",
+                &[&hero_name(heroes, key.hero_id)],
+            ),
+            &mode_label(key.mode),
+        )]),
+        RecommendationStatus::Interrupted { interrupted, .. } => {
+            Some(vec![RowContent::diagnostic(
+                &interrupted.to_diagnostic(redactor),
+            )])
         }
-        self.render(widgets);
+        RecommendationStatus::Ready(_) => None,
     }
 }
 
-impl ItemsPage {
-    /// Atualiza só as linhas que mudaram desde o último estado exibido.
-    fn render(&self, widgets: &mut ItemsWidgets) {
-        let content = items_content(
-            &self.recommendations,
-            &self.heroes,
-            &self.items,
-            &self.redactor,
-        );
-        widgets.header.show(content.header);
-        widgets.notes.show(content.notes);
-        widgets.pro.show(content.pro);
-        widgets.public.show(content.public);
-        widgets.popularity.show(content.popularity);
-    }
+/// Cabeçalho das abas de recomendação com os dados prontos.
+pub fn ready_header(recommendations: &Recommendations, heroes: &HeroCatalog) -> RowContent {
+    RowContent::new(
+        Level::Info,
+        &translate_with(
+            "{} · {} · patch {}",
+            &[
+                &hero_name(heroes, recommendations.key.hero_id),
+                &mode_label(recommendations.key.mode),
+                &recommendations.patch.name,
+            ],
+        ),
+        &translate_with(
+            "Consultado às {}",
+            &[&format_time(recommendations.loaded_at)],
+        ),
+    )
 }
 
-/// Conteúdo da aba para o estado das recomendações.
+/// Aviso das abas que usam partidas profissionais quando o modo é Turbo.
+pub fn turbo_warning(subtitle: &str) -> RowContent {
+    RowContent::new(
+        Level::Warning,
+        &translate("Partidas profissionais não são turbo"),
+        subtitle,
+    )
+}
+
+/// Aviso do modo Contra bots, que usa os dados de Escolha Livre.
+pub fn bots_note() -> RowContent {
+    RowContent::new(
+        Level::Info,
+        &translate("Modo Contra bots: as builds vêm de partidas de Escolha Livre entre jogadores."),
+        &translate("Não há dados de partidas contra bots nas recomendações."),
+    )
+}
+
+/// Conteúdo da aba Itens para o estado das recomendações.
 pub fn items_content(
     status: &RecommendationStatus,
     heroes: &HeroCatalog,
     items: &ItemCatalog,
     redactor: &Redactor,
 ) -> ItemsContent {
-    let hero_name = |hero_id: u32| {
-        heroes.by_id(hero_id).map_or_else(
-            || translate_with("herói {}", &[&hero_id.to_string()]),
-            |hero| hero.display_name.clone(),
-        )
-    };
     match status {
-        RecommendationStatus::Unavailable => ItemsContent {
-            header: vec![RowContent::new(
-                Level::Warning,
-                &translate("Recomendações indisponíveis"),
-                &translate(
-                    "O banco local ou o cliente HTTP não puderam ser abertos; os detalhes estão no log.",
-                ),
-            )],
+        RecommendationStatus::Ready(recommendations) => {
+            ready_content(recommendations.as_ref(), heroes, items, redactor)
+        }
+        _ => ItemsContent {
+            header: status_rows(status, heroes, redactor).unwrap_or_default(),
             ..ItemsContent::default()
         },
-        RecommendationStatus::Idle => ItemsContent {
-            header: vec![RowContent::new(
-                Level::Info,
-                &translate("Nenhum herói para recomendar"),
-                &translate("As recomendações aparecem quando o Dota informa o herói escolhido."),
-            )],
-            ..ItemsContent::default()
-        },
-        RecommendationStatus::Loading { key } => ItemsContent {
-            header: vec![RowContent::new(
-                Level::Info,
-                &translate_with("Carregando recomendações de {}", &[&hero_name(key.hero_id)]),
-                &mode_label(key.mode),
-            )],
-            ..ItemsContent::default()
-        },
-        RecommendationStatus::Interrupted { interrupted, .. } => ItemsContent {
-            header: vec![RowContent::diagnostic(&interrupted.to_diagnostic(redactor))],
-            ..ItemsContent::default()
-        },
-        RecommendationStatus::Ready(recommendations) => ready_content(
-            recommendations,
-            &hero_name(recommendations.key.hero_id),
-            items,
-            redactor,
-        ),
     }
 }
 
 fn ready_content(
     recommendations: &Recommendations,
-    hero_name: &str,
+    heroes: &HeroCatalog,
     items: &ItemCatalog,
     redactor: &Redactor,
 ) -> ItemsContent {
     let mode = recommendations.key.mode;
     let patch = &recommendations.patch.name;
-    let header = vec![RowContent::new(
-        Level::Info,
-        &translate_with("{} · {} · patch {}", &[hero_name, &mode_label(mode), patch]),
-        &translate_with(
-            "Consultado às {}",
-            &[&format_time(recommendations.loaded_at)],
-        ),
-    )];
+    let header = vec![ready_header(recommendations, heroes)];
     let mut notes = vec![RowContent::new(
         Level::Info,
         &translate(
@@ -253,22 +161,14 @@ fn ready_content(
         &translate("A posição (1 a 5) não vem do Dota, e as builds misturam todas as posições."),
     )];
     if mode == GameMode::Bots {
-        notes.push(RowContent::new(
-            Level::Info,
-            &translate(
-                "Modo Contra bots: as builds vêm de partidas de Escolha Livre entre jogadores.",
-            ),
-            &translate("Não há dados de partidas contra bots nas recomendações."),
-        ));
+        notes.push(bots_note());
     }
 
     let mut pro = Vec::new();
     if mode == GameMode::Turbo {
-        pro.push(RowContent::new(
-            Level::Warning,
-            &translate("Partidas profissionais não são turbo"),
-            &translate("Os tempos de compra destas builds não valem para o ritmo do turbo."),
-        ));
+        pro.push(turbo_warning(&translate(
+            "Os tempos de compra destas builds não valem para o ritmo do turbo.",
+        )));
     }
     let pro_builds = &recommendations.pro;
     pro.extend(
@@ -397,7 +297,8 @@ fn insufficient_sample(analyzed: usize, matches_kind: &str) -> RowContent {
     )
 }
 
-fn source_row(source: &str, origin: Option<DataOrigin>) -> RowContent {
+/// Linha da fonte, com o aviso de dados antigos ou ausentes.
+pub fn source_row(source: &str, origin: Option<DataOrigin>) -> RowContent {
     let (level, freshness) = match origin {
         Some(DataOrigin::Live | DataOrigin::Cached) => (Level::Info, translate("Dados atuais")),
         Some(DataOrigin::Stale) => (

@@ -25,6 +25,8 @@ A aba **Itens** mostra recomendações para o herói e o modo da partida, com da
 - os itens mais comprados por fase do jogo em partidas profissionais, como popularidade, não taxa de vitória;
 - informa a fonte, o patch e se os dados são antigos (guardados de uma consulta anterior), e que a recomendação não considera posição (1 a 5).
 
+A aba **Habilidades** mostra a ordem de habilidades mais comum nos dez primeiros níveis em partidas profissionais do herói, e a aba **Dados profissionais**, as partidas profissionais recentes com ele (liga, resultado, data e duração).
+
 As partidas públicas são coletadas em segundo plano enquanto o aplicativo está aberto. O aplicativo limita as próprias chamadas ao OpenDota (por padrão, 1.000 por dia, com até 700 para a coleta) e guarda as respostas no banco local.
 
 A tela **Diagnóstico** mostra se tudo está pronto para o GSI funcionar:

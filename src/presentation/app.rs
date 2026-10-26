@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::application::event_bus::UiCommand;
 use crate::application::state::{AppSnapshot, ServerState};
+use crate::domain::ability_catalog::AbilityIdCatalog;
 use crate::domain::hero_catalog::HeroCatalog;
 use crate::domain::item_catalog::ItemCatalog;
 
@@ -19,7 +20,10 @@ use super::pages::{
     self,
     diagnostics::{DiagnosticsMessage, DiagnosticsPage},
     hero::{HeroMessage, HeroPage, HeroPageInit},
-    items::{ItemsMessage, ItemsPage, ItemsPageInit},
+    recommendation_page::{
+        RecommendationCatalogs, RecommendationMessage, RecommendationPage, RecommendationPageInit,
+        RecommendationTab,
+    },
 };
 
 /// Canais de comunicação entre a janela e o núcleo, e os dados embutidos.
@@ -28,6 +32,7 @@ pub struct CoreHandle {
     pub state: watch::Receiver<AppSnapshot>,
     pub heroes: Arc<HeroCatalog>,
     pub items: Arc<ItemCatalog>,
+    pub abilities: Arc<AbilityIdCatalog>,
 }
 
 /// O que a janela recebe do laço que acompanha o núcleo.
@@ -97,7 +102,8 @@ pub async fn forward_snapshots(
 /// Componente raiz da janela principal.
 pub struct App {
     hero: Controller<HeroPage>,
-    items: Controller<ItemsPage>,
+    /// Abas Habilidades, Itens e Dados profissionais.
+    recommendation_pages: Vec<Controller<RecommendationPage>>,
     diagnostics: Controller<DiagnosticsPage>,
     /// Leitura do estado mais recente quando chega `CoreUpdate::Changed`.
     state: watch::Receiver<AppSnapshot>,
@@ -132,12 +138,27 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let items = ItemsPage::builder()
-            .launch(ItemsPageInit {
-                heroes: Arc::clone(&core.heroes),
-                items: Arc::clone(&core.items),
-            })
-            .detach();
+        let catalogs = RecommendationCatalogs {
+            heroes: Arc::clone(&core.heroes),
+            items: Arc::clone(&core.items),
+            abilities: core.abilities,
+        };
+        let recommendation_pages: Vec<(&str, String, Controller<RecommendationPage>)> = [
+            ("abilities", RecommendationTab::Abilities),
+            ("items", RecommendationTab::Items),
+            ("pro", RecommendationTab::ProMatches),
+        ]
+        .into_iter()
+        .map(|(name, tab)| {
+            let page = RecommendationPage::builder()
+                .launch(RecommendationPageInit {
+                    tab,
+                    catalogs: catalogs.clone(),
+                })
+                .detach();
+            (name, tab.title(), page)
+        })
+        .collect();
         let hero = HeroPage::builder()
             .launch(HeroPageInit {
                 commands: core.commands.clone(),
@@ -152,12 +173,11 @@ impl Component for App {
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
         stack.add_titled(hero.widget(), Some("hero"), &translate("Herói"));
+        for (name, title, page) in &recommendation_pages {
+            stack.add_titled(page.widget(), Some(name), title);
+        }
         for (name, title, page) in pages::tabs() {
             stack.add_titled(&page, Some(name), &title);
-            // A aba Itens fica logo depois de Habilidades.
-            if name == "abilities" {
-                stack.add_titled(items.widget(), Some("items"), &translate("Itens"));
-            }
         }
         stack.add_titled(
             diagnostics.widget(),
@@ -203,7 +223,10 @@ impl Component for App {
         ComponentParts {
             model: App {
                 hero,
-                items,
+                recommendation_pages: recommendation_pages
+                    .into_iter()
+                    .map(|(_, _, page)| page)
+                    .collect(),
                 diagnostics,
                 state: window_state,
                 pending,
@@ -228,8 +251,11 @@ impl Component for App {
                 widgets.connection.set_label(&connection_label(&snapshot));
                 self.hero
                     .emit(HeroMessage::Snapshot(Box::new((*snapshot).clone())));
-                self.items
-                    .emit(ItemsMessage::Snapshot(Box::new((*snapshot).clone())));
+                for page in &self.recommendation_pages {
+                    page.emit(RecommendationMessage::Snapshot(Box::new(
+                        (*snapshot).clone(),
+                    )));
+                }
                 self.diagnostics
                     .emit(DiagnosticsMessage::Snapshot(snapshot));
             }

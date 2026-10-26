@@ -1,8 +1,11 @@
 //! Páginas da janela principal e a lista de abas.
 
+pub mod abilities;
 pub mod diagnostics;
 pub mod hero;
 pub mod items;
+pub mod pro;
+pub mod recommendation_page;
 
 use relm4::adw;
 use tokio::sync::mpsc::UnboundedSender;
@@ -36,19 +39,14 @@ pub fn planned_page(title: &str) -> adw::StatusPage {
 
 /// Abas ainda sem conteúdo: identificador, título e página.
 pub fn tabs() -> Vec<(&'static str, String, adw::StatusPage)> {
-    [
-        ("abilities", "Habilidades"),
-        ("pro", "Dados profissionais"),
-        ("history", "Histórico"),
-        ("settings", "Configurações"),
-    ]
-    .into_iter()
-    .map(|(id, title)| {
-        let title = translate(title);
-        let page = planned_page(&title);
-        (id, title, page)
-    })
-    .collect()
+    [("history", "Histórico"), ("settings", "Configurações")]
+        .into_iter()
+        .map(|(id, title)| {
+            let title = translate(title);
+            let page = planned_page(&title);
+            (id, title, page)
+        })
+        .collect()
 }
 
 #[cfg(test)]

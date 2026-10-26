@@ -14,6 +14,7 @@ use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::application::use_cases::call_budget::BudgetLimits;
 use dota_companion::application::use_cases::external_sources::ExternalSources;
 use dota_companion::application::use_cases::public_collection::run_collection;
+use dota_companion::domain::ability_catalog::AbilityIdCatalog;
 use dota_companion::domain::gsi_config::GsiEndpoint;
 use dota_companion::domain::hero_catalog::HeroCatalog;
 use dota_companion::domain::item_catalog::ItemCatalog;
@@ -146,6 +147,17 @@ fn main() -> anyhow::Result<()> {
         HeroCatalog::default()
     });
 
+    // Sem os dados embutidos o app segue: a ordem de habilidades aparece com
+    // os IDs.
+    let abilities =
+        infrastructure::ability_id_data::embedded_catalog().unwrap_or_else(|data_error| {
+            log_error(
+                &data_error.to_diagnostic(&Redactor::default()),
+                "embedded ability ids are invalid; ability order shows ids",
+            );
+            AbilityIdCatalog::default()
+        });
+
     // GTK recebe só o nome do programa; argumentos são nossos.
     RelmApp::new(APP_ID)
         .with_args(Vec::new())
@@ -154,6 +166,7 @@ fn main() -> anyhow::Result<()> {
             state: state_receiver,
             heroes: Arc::new(heroes),
             items,
+            abilities: Arc::new(abilities),
         });
     runtime.shutdown_background();
     Ok(())
