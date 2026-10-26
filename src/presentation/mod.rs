@@ -2,6 +2,7 @@
 //! nenhuma regra de negócio mora aqui.
 
 pub mod app;
+pub mod build_widgets;
 pub mod i18n;
 pub mod pages;
 pub mod widgets;

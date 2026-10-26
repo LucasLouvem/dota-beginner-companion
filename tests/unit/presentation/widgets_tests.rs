@@ -101,3 +101,21 @@ fn duration_uses_hours_only_when_needed() {
     assert_eq!(format_duration(1429), "23:49");
     assert_eq!(format_duration(3723), "1:02:03");
 }
+
+#[test]
+fn list_changes_work_for_any_list() {
+    let same = |_: &u32, _: &u32| true;
+    assert_eq!(
+        list_changes(&[1, 2, 3], &[1, 5, 3, 4], same),
+        vec![RowChange::Update(1), RowChange::Append(3)]
+    );
+    assert_eq!(
+        list_changes(&[1, 2, 3], &[1], same),
+        vec![RowChange::Truncate(1)]
+    );
+    assert_eq!(
+        list_changes(&[1, 2], &[1, 9], |old, new| old % 2 == new % 2),
+        vec![RowChange::Replace(1)]
+    );
+    assert!(list_changes::<u32>(&[], &[], same).is_empty());
+}

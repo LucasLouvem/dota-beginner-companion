@@ -68,13 +68,26 @@ pub enum RowChange {
 /// O que muda, posição por posição, para a lista passar de `shown` a `new`.
 /// Linhas iguais não geram alteração.
 pub fn row_changes(shown: &[RowContent], new: &[RowContent]) -> Vec<RowChange> {
+    list_changes(shown, new, |old_row, new_row| {
+        old_row.level == new_row.level
+    })
+}
+
+/// Como `row_changes`, para qualquer lista: `same_widget` diz se o elemento
+/// mudado pode ser atualizado no mesmo widget (`Update`) ou precisa de um
+/// novo (`Replace`).
+pub fn list_changes<T: PartialEq>(
+    shown: &[T],
+    new: &[T],
+    same_widget: impl Fn(&T, &T) -> bool,
+) -> Vec<RowChange> {
     let mut changes: Vec<RowChange> = shown
         .iter()
         .zip(new)
         .enumerate()
-        .filter(|(_, (old_row, new_row))| old_row != new_row)
-        .map(|(index, (old_row, new_row))| {
-            if old_row.level == new_row.level {
+        .filter(|(_, (old_item, new_item))| old_item != new_item)
+        .map(|(index, (old_item, new_item))| {
+            if same_widget(old_item, new_item) {
                 RowChange::Update(index)
             } else {
                 RowChange::Replace(index)
