@@ -48,6 +48,7 @@ fn version_two_database(path: &Path) {
         .execute_batch(
             "INSERT INTO call_budget VALUES ('collection', 'day', '2026-10-25', 12);
             INSERT INTO collection_cursor VALUES (1, 9061960072);
+            INSERT INTO cache VALUES ('stats/matches/9055224065', '{}', 1000);
             INSERT INTO public_builds VALUES
                 (1, 22, 23, 60, NULL, NULL, 1, 'final_inventory_unordered', '[]', NULL);
             PRAGMA user_version = 2;",
@@ -69,7 +70,7 @@ fn new_database_gets_every_table_and_the_current_version() {
 }
 
 #[test]
-fn version_two_database_drops_old_builds_and_keeps_cache_budget_and_cursor() {
+fn version_two_database_drops_old_builds_and_match_details_and_keeps_the_rest() {
     let temp_dir = tempfile::tempdir().unwrap();
     let path = temp_dir.path().join("companion.sqlite3");
     version_two_database(&path);
@@ -91,6 +92,10 @@ fn version_two_database_drops_old_builds_and_keeps_cache_budget_and_cursor() {
         )
         .unwrap();
     assert_eq!(kept, ("[22]".to_owned(), 12, 9_061_960_072));
+    let cached_keys: i64 = connection
+        .query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(cached_keys, 1, "só os detalhes de partida saem do cache");
 }
 
 #[test]

@@ -51,8 +51,11 @@ const MIGRATIONS: [&str; 3] = [
     );",
     // 3: as builds públicas passam a ser a build real dos vencedores. As
     // linhas da versão 2 (três itens por partida) não têm esses dados e são
-    // descartadas; o cursor continua valendo.
+    // descartadas; o cursor continua valendo. Os detalhes de partida no cache
+    // foram reduzidos sem a mochila e o neutro, então também saem e voltam a
+    // ser buscados quando preciso.
     "DROP TABLE public_builds;
+    DELETE FROM cache WHERE key LIKE 'stats/matches/%';
     CREATE TABLE public_wins (
         match_id INTEGER NOT NULL,
         hero_id INTEGER NOT NULL,
