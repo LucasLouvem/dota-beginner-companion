@@ -19,6 +19,13 @@ impl AbilityIdCatalog {
         self.names.get(&id).map(String::as_str)
     }
 
+    /// Talento: habilidade cujo nome interno começa com `special_bonus`.
+    /// Um ID desconhecido não é talento.
+    pub fn is_talent(&self, id: u32) -> bool {
+        self.name(id)
+            .is_some_and(|name| name.starts_with("special_bonus"))
+    }
+
     pub fn len(&self) -> usize {
         self.names.len()
     }

@@ -1,6 +1,7 @@
 //! Regras puras: não conhece GTK, HTTP, SQLite nem o sistema de arquivos.
 
 pub mod ability_catalog;
+pub mod build_progress;
 pub mod builds;
 pub mod dota_install;
 pub mod game;
