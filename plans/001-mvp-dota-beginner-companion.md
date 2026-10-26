@@ -188,12 +188,22 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Com a rede desligada e cache existente, as abas mostram os dados marcados como antigos. Sem cache, mostram "sem dados".
 - A aba Itens mostra, para o herói atual e o modo informado, as builds profissionais e públicas com taxa de vitória, amostra, momento médio quando houver, patch e fonte.
 
+**Verificações:**
+
+- `scripts/check.sh` passa com 489 testes unitários e 18 de integração. Os decodificadores do OpenDota são testados com respostas reais de 2026-10-25, sem dados pessoais (`tests/fixtures/opendota/`).
+- Consulta real das builds profissionais do Zeus no patch 7.41: 100 candidatas, 30 partidas válidas em 31 chamadas (33 s); a segunda consulta veio toda do cache, sem chamadas (83 ms). Nenhuma build chegou a 10 partidas, e a ordem de habilidades também ficou abaixo do mínimo: a amostra insuficiente é o resultado esperado para muitos heróis.
+- Coleta pública real no app aberto: no primeiro ciclo, 100 partidas listadas, 88 aceitas (as de bots e de outros modos ficaram de fora sem chamada) e 366 builds de 107 heróis, com 89 chamadas da coleta. Cerca de 80% das partidas públicas são turbo, e a lista pública traz os heróis dos times zerados, por isso eles vêm dos detalhes.
+- As abas Itens, Habilidades e Dados profissionais foram conferidas pela acessibilidade com o app aberto, a API real e a fixture do Zeus: cabeçalho com herói, modo e patch; avisos de rank, posição, Turbo e Contra bots; amostra insuficiente nas builds e na ordem de habilidades; popularidade por fase e partidas profissionais recentes com dados reais.
+- A troca de herói ou de modo durante uma consulta é coberta por testes determinísticos do núcleo: a resposta antiga é descartada. Com a conferência de geração desligada de propósito, os dois testes falham.
+- Achados da API real registrados no README das fixtures: `/heroes/{hero_id}/matches` traz `account_id` e não traz os nomes dos times da especificação, e o inventário e a popularidade usam IDs numéricos de item, por isso o recorte embutido de itens guarda o `id` da origem.
+
 **Em aberto:**
 
-- Na coleta pública, se as partidas não analisadas (a maioria) entram com o inventário final como build sem ordem ou são descartadas.
-- Com 30 partidas profissionais válidas por herói, poucas builds devem chegar à amostra mínima: aumentar as partidas válidas, reduzir a amostra mínima só para as profissionais ou aceitar "amostra insuficiente" frequente.
-- Limites por consulta (60 candidatas, 30 válidas e 40 chamadas) e orçamento diário.
-- Faixas de rank da coleta pública e uso só do patch atual.
+- Conferência numa partida real com o jogo aberto, com captura de tela (#27), cobrindo também as abas de recomendação.
+- Conferência manual com a rede desligada: o fallback (cache antigo e "sem dados") é coberto por testes, mas não foi conferido no app.
+- Usar as partidas públicas contra bots (`lobby_type` 4) como fonte do modo Contra bots (#55).
+- Pela regra do item grande (receita e custo de pelo menos 2000), itens caros sem receita, como a Blink Dagger, não entram nas builds.
+- A amostra pública de Escolha Livre cresce devagar, porque a maioria das partidas públicas é turbo.
 - Guardar o último modo de jogo confirmado entre execuções do app, junto das configurações no SQLite.
 
 ## Fase 4 — Pós-partida, histórico, notificações e empacotamento
@@ -262,3 +272,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-24 — Fase 3 marcada como atual, a pedido do mantenedor. Ela começa pela conferência no jogo pendente da Fase 2. O relógio da partida em cada evento da linha do tempo entra na Fase 4. O tipo de partida no GSI fica em aberto, para conferir em partidas que não sejam contra bots.
 - 2026-10-25 — Partidas de teste contra bots e turbo: o GSI não informa o modo de jogo. Decidida e incluída na Fase 3 a escolha manual do modo ao encontrar a partida, como pré-requisito das recomendações.
 - 2026-10-25 — Plano completo da Fase 3 revisado: builds profissionais e públicas por modo, algoritmo da build, orçamento de chamadas como política do app, coleta pública em segundo plano, migração do banco para a versão 2 e proteção contra respostas antigas. A STRATZ saiu da fase para a milestone "Fontes de dados extras".
+- 2026-10-25 — Fase 3 implementada: dados embutidos com custo, ID dos itens, IDs de habilidades e patches; agregação de builds; banco na versão 2; orçamento de chamadas; cliente HTTP com fallback; patch atual; builds profissionais; coleta pública em segundo plano; recomendações no núcleo com proteção contra respostas antigas; abas Itens, Habilidades e Dados profissionais. Falta a conferência numa partida real (#27) para concluir a fase.
