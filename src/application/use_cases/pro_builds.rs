@@ -93,6 +93,8 @@ pub struct ProBuilds {
     pub stopped_by: Option<ProBuildsStop>,
     /// Origem da lista de candidatas.
     pub candidates_origin: Option<DataOrigin>,
+    /// Quando a lista de candidatas foi obtida do OpenDota.
+    pub candidates_fetched_at: Option<SystemTime>,
     /// Última falha da fonte, quando houve.
     pub error: Option<ProviderError>,
     pub calls: u32,
@@ -124,6 +126,7 @@ pub async fn load_pro_builds(
         discarded: BTreeMap::new(),
         stopped_by: None,
         candidates_origin: candidates.origin,
+        candidates_fetched_at: candidates.fetched_at,
         error: candidates.error,
         calls: 0,
     };

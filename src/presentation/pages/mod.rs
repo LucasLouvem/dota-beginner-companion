@@ -1,6 +1,7 @@
 //! Páginas da janela principal e a lista de abas.
 
 pub mod abilities;
+pub mod build;
 pub mod diagnostics;
 pub mod hero;
 pub mod items;

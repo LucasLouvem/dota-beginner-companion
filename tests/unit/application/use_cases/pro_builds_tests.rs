@@ -149,6 +149,11 @@ async fn the_three_most_recent_wins_are_kept_with_build_and_abilities() {
     assert_eq!(result.calls, 4, "a lista e os 3 detalhes");
     assert_eq!(result.stopped_by, Some(ProBuildsStop::WinLimit));
     assert_eq!(result.recent_matches.len(), 5);
+    assert_eq!(
+        result.candidates_fetched_at,
+        Some(at(10_000)),
+        "lista nova, buscada agora"
+    );
 }
 
 #[tokio::test]

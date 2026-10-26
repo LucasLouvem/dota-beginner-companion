@@ -23,6 +23,7 @@ pub fn pro_builds(wins: Vec<ProWin>, examined: usize, origin: Option<DataOrigin>
         discarded: BTreeMap::new(),
         stopped_by: None,
         candidates_origin: origin,
+        candidates_fetched_at: Some(UNIX_EPOCH),
         error: None,
         calls: 0,
     }
