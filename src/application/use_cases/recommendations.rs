@@ -9,6 +9,7 @@ use crate::application::ports::{
     CallCategory, PublicWin, StatsQuery, StorageError, StorageFailureKind,
 };
 use crate::application::state::{MatchStatus, ModeState};
+use crate::domain::builds::PlayerBuild;
 use crate::domain::game::{GameMode, HeroPick};
 use crate::domain::match_data::{ItemPopularity, source_game_modes};
 use crate::domain::patch::Patch;
@@ -35,6 +36,82 @@ pub struct Recommendations {
     pub public_error: Option<StorageError>,
     pub popularity: Sourced<ItemPopularity>,
     pub loaded_at: SystemTime,
+}
+
+/// De onde vem uma build da lista.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildSource {
+    Pro,
+    Public,
+}
+
+/// Identidade estável de uma build: a fonte e a partida. Dentro de uma
+/// consulta (um herói), cada partida aparece uma vez por fonte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BuildId {
+    pub source: BuildSource,
+    pub match_id: u64,
+}
+
+impl Recommendations {
+    /// Builds disponíveis, na ordem da lista: as profissionais e depois as
+    /// públicas, cada grupo da mais recente para a mais antiga.
+    pub fn build_ids(&self) -> Vec<BuildId> {
+        let pro = self.pro.wins.iter().map(|win| BuildId {
+            source: BuildSource::Pro,
+            match_id: win.hero_match.match_id,
+        });
+        let public = self.public_wins.iter().map(|win| BuildId {
+            source: BuildSource::Public,
+            match_id: win.match_id,
+        });
+        pro.chain(public).collect()
+    }
+
+    /// Build com o id dado; `None` quando ela não está nesta consulta.
+    pub fn build(&self, id: &BuildId) -> Option<&PlayerBuild> {
+        match id.source {
+            BuildSource::Pro => self
+                .pro
+                .wins
+                .iter()
+                .find(|win| win.hero_match.match_id == id.match_id)
+                .map(|win| &win.build),
+            BuildSource::Public => self
+                .public_wins
+                .iter()
+                .find(|win| win.match_id == id.match_id)
+                .map(|win| &win.build),
+        }
+    }
+
+    /// Ordem real de habilidades da build; só as profissionais analisadas a
+    /// têm.
+    pub fn ability_upgrades(&self, id: &BuildId) -> Option<&[u32]> {
+        match id.source {
+            BuildSource::Pro => self
+                .pro
+                .wins
+                .iter()
+                .find(|win| win.hero_match.match_id == id.match_id)
+                .and_then(|win| win.ability_upgrades.as_deref()),
+            BuildSource::Public => None,
+        }
+    }
+
+    /// Build a mostrar depois de uma atualização: a escolhida antes, se a
+    /// consulta é a mesma (herói, modo e patch) e ela ainda existe; senão, a
+    /// primeira da lista. `None` sem builds.
+    pub fn resolve_selection(
+        &self,
+        previous: Option<&(RecommendationKey, BuildId)>,
+    ) -> Option<BuildId> {
+        let ids = self.build_ids();
+        previous
+            .filter(|(key, id)| *key == self.key && ids.contains(id))
+            .map(|(_, id)| *id)
+            .or_else(|| ids.first().copied())
+    }
 }
 
 /// O que as recomendações devem mostrar agora: o herói da partida atual, ou

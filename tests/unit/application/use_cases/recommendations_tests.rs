@@ -4,11 +4,12 @@ use super::*;
 use crate::application::ports::PublicBuildStore;
 use crate::application::state::ModeOrigin;
 use crate::application::use_cases::fallback::DataOrigin;
+use crate::domain::builds::PlayerBuild;
 use crate::domain::game::GameSnapshot;
 use crate::domain::match_data::PopularityPhase;
 use crate::domain::match_events::{MatchResult, MatchSummary};
 use crate::test_support::{
-    FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
+    FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget, pro_win,
     public_win, zeus_build,
 };
 use std::time::UNIX_EPOCH;
@@ -200,4 +201,99 @@ async fn popularity_and_professional_results_come_with_their_sources() {
     assert!(recommendations.pro.error.is_some());
     assert!(recommendations.pro.wins.is_empty());
     assert_eq!(recommendations.patch, patch());
+}
+
+fn listed() -> Recommendations {
+    let pro = crate::test_support::pro_builds(
+        vec![
+            pro_win(30, zeus_build(), Some(vec![5110, 5111])),
+            pro_win(20, PlayerBuild::default(), None),
+        ],
+        8,
+        Some(DataOrigin::Live),
+    );
+    crate::test_support::recommendations(GameMode::AllPick, pro, vec![public_win(10, zeus_build())])
+}
+
+fn id(source: BuildSource, match_id: u64) -> BuildId {
+    BuildId { source, match_id }
+}
+
+#[test]
+fn builds_are_listed_professional_first_and_found_by_id() {
+    let recommendations = listed();
+
+    assert_eq!(
+        recommendations.build_ids(),
+        [
+            id(BuildSource::Pro, 30),
+            id(BuildSource::Pro, 20),
+            id(BuildSource::Public, 10)
+        ]
+    );
+    assert_eq!(
+        recommendations.build(&id(BuildSource::Pro, 30)),
+        Some(&zeus_build())
+    );
+    assert_eq!(
+        recommendations.ability_upgrades(&id(BuildSource::Pro, 30)),
+        Some(&[5110, 5111][..])
+    );
+    assert_eq!(
+        recommendations.ability_upgrades(&id(BuildSource::Pro, 20)),
+        None
+    );
+    assert_eq!(
+        recommendations.ability_upgrades(&id(BuildSource::Public, 10)),
+        None
+    );
+}
+
+#[test]
+fn unknown_build_id_is_none_without_panic() {
+    let recommendations = listed();
+    assert_eq!(recommendations.build(&id(BuildSource::Public, 30)), None);
+    assert_eq!(recommendations.build(&id(BuildSource::Pro, 999)), None);
+}
+
+#[test]
+fn selection_is_kept_for_the_same_query_and_reset_otherwise() {
+    let recommendations = listed();
+    let chosen = id(BuildSource::Public, 10);
+    let same_query = (recommendations.key.clone(), chosen);
+    let other_mode = (
+        RecommendationKey {
+            mode: GameMode::Turbo,
+            ..recommendations.key.clone()
+        },
+        chosen,
+    );
+    let vanished = (recommendations.key.clone(), id(BuildSource::Pro, 999));
+
+    assert_eq!(
+        recommendations.resolve_selection(Some(&same_query)),
+        Some(chosen)
+    );
+    assert_eq!(
+        recommendations.resolve_selection(Some(&other_mode)),
+        Some(id(BuildSource::Pro, 30))
+    );
+    assert_eq!(
+        recommendations.resolve_selection(Some(&vanished)),
+        Some(id(BuildSource::Pro, 30))
+    );
+    assert_eq!(
+        recommendations.resolve_selection(None),
+        Some(id(BuildSource::Pro, 30))
+    );
+}
+
+#[test]
+fn without_builds_there_is_no_selection() {
+    let empty = crate::test_support::recommendations(
+        GameMode::AllPick,
+        crate::test_support::pro_builds(vec![], 0, None),
+        vec![],
+    );
+    assert_eq!(empty.resolve_selection(None), None);
 }
