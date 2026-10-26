@@ -6,26 +6,28 @@ Feito para Arch Linux com KDE Plasma (Wayland), em Rust com GTK4 + Relm4.
 
 ## Funcionalidades
 
-A aba **Herói** acompanha a partida pelo GSI:
+A aba **Herói** começa pela página da build, com dados do [OpenDota](https://www.opendota.com/) do patch atual para o herói e o modo da partida:
+
+- à esquerda, as 3 vitórias mais recentes do herói em partidas profissionais de liga e as 5 mais recentes em partidas públicas do modo, com as imagens dos itens finais; escolha uma para acompanhá-la (a escolha fica só no aplicativo e não muda nada no jogo);
+- à direita, a build real da vitória escolhida, como o jogador fez: itens iniciais, a ordem dos itens completos com o que você já comprou (✓) e o próximo (→), itens finais, mochila, item neutro com o aprimoramento e todas as compras por fase, com o minuto de cada uma; o aplicativo não monta builds nem esconde itens;
+- a grade da ordem de habilidades da vitória, ponto a ponto, com os pontos que você já gastou;
+- em cima, o herói, o modo, o patch, quantas vitórias foram encontradas, se os dados são antigos e avisos: em Turbo, as vitórias profissionais não são de Turbo; Contra bots usa os dados de Escolha Livre; as partidas não são separadas por posição (1 a 5);
+- embaixo, os itens mais comprados por fase em partidas profissionais, como popularidade, não taxa de vitória.
+
+As imagens dos itens são baixadas do CDN da Steam na primeira vez e guardadas em `~/.cache/dota-companion/item-icons/`; sem rede, os itens aparecem pelo nome. As imagens são da Valve e não fazem parte do repositório.
+
+Na mesma aba, abaixo da build, o aplicativo acompanha a partida pelo GSI:
 
 - quando a partida é encontrada, pergunta numa janela do próprio aplicativo o modo de jogo (Escolha Livre, Turbo ou Contra bots), que o GSI não informa; a escolha vem marcada com o último modo confirmado e pode ser alterada depois;
 - mostra o herói escolhido com atributo, tipo de ataque e funções, a partir de dados embutidos do [dotaconstants](https://github.com/odota/dotaconstants) (sem rede), que também fornecem os nomes e as receitas dos itens;
-- mostra as estatísticas da partida (abates, mortes, assistências, last hits, denies, GPM, XPM, nível e ouro) e os itens carregados, com nomes de exibição;
+- mostra as estatísticas da partida (abates, mortes, assistências, last hits, denies, GPM, XPM, nível e ouro) e os itens carregados, com nomes de exibição, inclusive o item neutro e o aprimoramento dele;
 - lista as habilidades com o nível atual informado pelo GSI;
 - monta a linha do tempo da partida: partida encontrada, herói escolhido, início e fim da partida, níveis de habilidade, itens que entram ou saem, itens neutros, itens montados a partir dos componentes e mortes (o TP fica de fora);
 - depois que a partida termina, mostra o resumo dela (resultado, duração, estatísticas, itens finais e o ID da partida, quando o Dota o envia) até a próxima partida ser encontrada;
 - indica a origem de cada informação: dado embutido, confirmado pelo GSI, inferido pelo aplicativo ou marcado por você;
 - tem o botão **Partida encontrada**, para marcar esse momento manualmente, já que o GSI não o informa.
 
-A aba **Itens** mostra recomendações para o herói e o modo da partida, com dados do [OpenDota](https://www.opendota.com/) do patch atual:
-
-- as 3 vitórias mais recentes do herói em partidas profissionais de liga e as 5 mais recentes em partidas públicas do modo; em Turbo, avisa que partidas profissionais não são turbo, e Contra bots usa os dados de Escolha Livre;
-- a build real de cada vitória, como o jogador fez: inventário final, mochila, item neutro com o aprimoramento e, quando a partida foi analisada, a ordem de compra completa com o minuto de cada item; o aplicativo não monta builds nem esconde itens;
-- quando há menos vitórias recentes que o esperado, quantas foram encontradas;
-- os itens mais comprados por fase do jogo em partidas profissionais, como popularidade, não taxa de vitória;
-- informa a fonte, o patch e se os dados são antigos (guardados de uma consulta anterior), e que as partidas não são separadas por posição (1 a 5).
-
-A aba **Habilidades** mostra a ordem em que as habilidades foram evoluídas em cada uma dessas vitórias profissionais, e a aba **Dados profissionais**, as partidas profissionais recentes com ele (liga, resultado, data e duração).
+A aba **Dados profissionais** mostra as partidas profissionais recentes com o herói (liga, resultado, data e duração).
 
 As partidas públicas são coletadas em segundo plano enquanto o aplicativo está aberto. O aplicativo limita as próprias chamadas ao OpenDota (por padrão, 1.000 por dia, com até 700 para a coleta) e guarda as respostas no banco local.
 

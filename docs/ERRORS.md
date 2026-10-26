@@ -189,13 +189,13 @@ O aplicativo continua com um fallback e registra o diagnóstico no log. As tradu
 
 Os detalhes técnicos trazem só a operação e a causa: a mensagem de um pânico pode conter dados processados e não aparece.
 
-| Situação                                                                         | Código                  | Estado                                                                   | Ação para o usuário                                   |
-| -------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------- |
-| Diagnóstico, instalação ou teste de conexão terminou com pânico ou foi cancelado | `CORE_TASK_INTERRUPTED` | Linha da operação interrompida; o teste sai de "Testando…"               | Tentar de novo; se repetir, reiniciar o aplicativo    |
-| A consulta de recomendações terminou com pânico ou foi cancelada                 | `CORE_TASK_INTERRUPTED` | A aba Itens mostra "A consulta de recomendações foi interrompida"        | Trocar de herói ou de modo, ou reiniciar o aplicativo |
-| A gravação do log de eventos parou                                               | `CORE_TASK_INTERRUPTED` | "A gravação do log de eventos GSI parou"; nenhum evento é gravado depois | Reiniciar o aplicativo                                |
-| A tela deixou de receber o estado                                                | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou"; a barra mostra "GSI: núcleo parado"      | Reiniciar o aplicativo                                |
-| Um comando da tela não foi recebido                                              | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou", com o comando                            | Reiniciar o aplicativo                                |
+| Situação                                                                         | Código                  | Estado                                                                              | Ação para o usuário                                   |
+| -------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Diagnóstico, instalação ou teste de conexão terminou com pânico ou foi cancelado | `CORE_TASK_INTERRUPTED` | Linha da operação interrompida; o teste sai de "Testando…"                          | Tentar de novo; se repetir, reiniciar o aplicativo    |
+| A consulta de recomendações terminou com pânico ou foi cancelada                 | `CORE_TASK_INTERRUPTED` | A página da build (aba Herói) mostra "A consulta de recomendações foi interrompida" | Trocar de herói ou de modo, ou reiniciar o aplicativo |
+| A gravação do log de eventos parou                                               | `CORE_TASK_INTERRUPTED` | "A gravação do log de eventos GSI parou"; nenhum evento é gravado depois            | Reiniciar o aplicativo                                |
+| A tela deixou de receber o estado                                                | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou"; a barra mostra "GSI: núcleo parado"                 | Reiniciar o aplicativo                                |
+| Um comando da tela não foi recebido                                              | `CORE_UNAVAILABLE`      | "O núcleo do aplicativo parou", com o comando                                       | Reiniciar o aplicativo                                |
 
 ### Log de eventos GSI (`GsiRecordError`)
 
