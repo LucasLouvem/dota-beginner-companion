@@ -159,20 +159,21 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 
 **Depende de:** Fase 2
 
-**Escopo:** integração com o OpenDota (patch, popularidade de itens, partidas profissionais, detalhes de partidas e partidas públicas), cache com fallback, orçamento de chamadas, coleta de partidas públicas em segundo plano e agregação de builds e da ordem de habilidades. Abas Itens, Habilidades e Dados profissionais. Inclui a escolha manual do modo de jogo, pré-requisito das recomendações.
+**Escopo:** integração com o OpenDota (patch, popularidade de itens, partidas profissionais, detalhes de partidas e partidas públicas), cache com fallback, orçamento de chamadas, coleta de partidas públicas em segundo plano e a build real e a ordem de habilidades das vitórias recentes. Abas Itens, Habilidades e Dados profissionais. Inclui a escolha manual do modo de jogo, pré-requisito das recomendações.
 
 **Decisões tomadas:**
 
 - Interface de provider com fallback, nesta ordem: dado novo da API, cache vencido marcado como antigo, dados embutidos só onde existem (catálogos de itens, heróis, habilidades e patch) e, sem nenhum deles, "sem dados". Não há builds nem estatísticas embutidas ([ARCHITECTURE](../docs/ARCHITECTURE.md#decisões-aprovadas-e-não-implementadas)).
-- Toda recomendação mostra fonte, patch, data de atualização e quantidade de partidas, e é apresentada como sugestão estatística.
+- Toda recomendação mostra fonte, patch e data de atualização.
 - Chaves de API ficam em `.env` ou na configuração local, nunca no código.
 - O modo de jogo é escolhido pelo usuário, porque o GSI não o informa. Nas partidas de teste de 2026-10-25 (uma contra bots e uma turbo com matchmaking), nenhum campo indicou o modo; o `matchid` real chegou antes da seleção de heróis só na turbo, e o pré-jogo foi mais curto nela, mas são indícios de uma amostra e não decidem o modo. As recomendações precisam do modo para não misturar turbo com partidas normais, por isso a escolha entra nesta fase.
 - Ao encontrar a partida, o app pergunta o modo numa janela sobre ele mesmo, nunca sobre o jogo, com Escolha Livre, Turbo e Contra bots. A pré-seleção é o último modo confirmado na execução (Escolha Livre na primeira partida). Só "Confirmar" conta como escolha do usuário; fechar a pergunta vale o modo pré-selecionado como modo padrão. O modo pode ser alterado depois na aba Herói, sem reiniciar a partida, e fica só em memória.
 - A fase começa pela conferência numa partida real, com o jogo aberto, da interface depois das mudanças de desempenho da Fase 2 (leitura de acessibilidade e captura de tela), antes de implementar qualquer coisa nova. Na mesma partida, conferir o que o GSI envia sobre o tipo de partida (ver "Em aberto").
 - Modos no OpenDota: Escolha Livre usa `game_mode` 1 e 22, Turbo usa 23 e Contra bots usa os dados de Escolha Livre, com aviso. Ranqueada depende de `lobby_type` e não é inferida pelo `game_mode`.
-- A aba Itens mostra, em cima, até 3 builds de partidas profissionais com a maior taxa de vitória observada (em Turbo, com o aviso de que partidas profissionais não são turbo) e, embaixo, até 5 builds de partidas públicas do modo, da maior para a menor taxa. A popularidade por fase (`/heroes/{hero_id}/itemPopularity`, de partidas profissionais) é uma seção complementar, porque não traz builds, ordem de compra nem taxa de vitória.
-- Uma build é aproximada a partir dos dados disponíveis, não é um evento do jogo. Item grande tem receita e custo de pelo menos 2000. Em partida analisada, vale o primeiro registro de cada item grande no `purchase_log`, sem componentes, em ordem do primeiro horário e sem repetição; os 3 primeiros formam a build ordenada. Sem esse registro, valem os 3 primeiros itens grandes do inventário final, como conjunto sem ordem. Com menos de 3 itens grandes, a partida não forma build.
-- As builds são ordenadas pela taxa de vitória, com desempate pelo tamanho da amostra, e só aparecem com pelo menos 10 partidas; a amostra é sempre exibida. É uma métrica simples, que pode ser aprimorada depois.
+- O app não monta builds nem esconde itens: mostra a build real de partidas escolhidas pelo herói e pelo modo (decisão de 2026-10-25, #56, que substituiu a agregação por item grande, amostra mínima e taxa de vitória).
+- A aba Itens mostra, em cima, as 3 vitórias mais recentes do herói em partidas profissionais de liga do patch (em Turbo, com o aviso de que partidas profissionais não são turbo) e, embaixo, as 5 vitórias mais recentes em partidas públicas do modo. A popularidade por fase (`/heroes/{hero_id}/itemPopularity`, de partidas profissionais) é uma seção complementar.
+- A build de uma vitória é o inventário final completo (6 espaços, mochila, neutro e aprimoramento) e, quando a partida foi analisada, a ordem de compra completa com o minuto de cada compra, inclusive consumíveis. Sem inventário, a partida não aparece; sem registro de compras, aparece só o inventário.
+- A aba Habilidades mostra a ordem real de habilidades de cada vitória profissional mostrada.
 - `/heroes/{hero_id}/matches` não é documentado como lista de partidas profissionais: só contam as com `leagueid` diferente de zero, conferido também nos detalhes da partida.
 - Partidas públicas são coletadas em segundo plano, com o app aberto, a partir de `/publicMatches` (amostra aleatória que traz só os heróis), com os detalhes de cada partida e o cursor guardados no SQLite.
 - O orçamento de chamadas é uma política própria e conservadora do aplicativo, não um limite oficial do OpenDota: contadores diário e mensal no SQLite, reserva antes de cada chamada (incluindo novas tentativas e respostas 429) e categorias separadas, em que as consultas da tela têm prioridade sobre a coleta. O padrão é 1.000 chamadas por dia, com até 700 para a coleta.
@@ -182,18 +183,19 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 **Resultados mínimos esperados:**
 
 - Testes com HTTP simulado cobrem resposta válida, erro de rede, tempo esgotado, limite de requisições (429), corpo grande demais e resposta malformada, sem acessar a internet.
-- Testes de agregação cobrem a montagem da build, empate, amostra insuficiente, taxa de 100% em amostra pequena, momento médio e ordem de habilidades.
+- Testes cobrem a leitura da build real (inventário, mochila, neutro e compras em ordem), a escolha das vitórias mais recentes e a apresentação de cada vitória.
 - Uma resposta antiga de outro herói ou modo não substitui a consulta atual, com teste determinístico.
-- O banco local migra da versão 1 para a 2 de forma atômica, com testes de banco antigo, corrompido e de versão futura.
+- O banco local migra das versões 1 e 2 para a 3 de forma atômica, com testes de banco antigo, corrompido e de versão futura.
 - Com a rede desligada e cache existente, as abas mostram os dados marcados como antigos. Sem cache, mostram "sem dados".
-- A aba Itens mostra, para o herói atual e o modo informado, as builds profissionais e públicas com taxa de vitória, amostra, momento médio quando houver, patch e fonte.
+- A aba Itens mostra, para o herói atual e o modo informado, a build real das vitórias profissionais e públicas recentes, com patch e fonte.
 
 **Verificações:**
 
-- `scripts/check.sh` passa com 489 testes unitários e 18 de integração. Os decodificadores do OpenDota são testados com respostas reais de 2026-10-25, sem dados pessoais (`tests/fixtures/opendota/`).
+- `scripts/check.sh` passa com 477 testes unitários e 18 de integração (depois da troca pela build real). Os decodificadores do OpenDota são testados com respostas reais de 2026-10-25, sem dados pessoais (`tests/fixtures/opendota/`).
 - Consulta real das builds profissionais do Zeus no patch 7.41: 100 candidatas, 30 partidas válidas em 31 chamadas (33 s); a segunda consulta veio toda do cache, sem chamadas (83 ms). Nenhuma build chegou a 10 partidas, e a ordem de habilidades também ficou abaixo do mínimo: a amostra insuficiente é o resultado esperado para muitos heróis.
 - Coleta pública real no app aberto: no primeiro ciclo, 100 partidas listadas, 88 aceitas (as de bots e de outros modos ficaram de fora sem chamada) e 366 builds de 107 heróis, com 89 chamadas da coleta. Cerca de 80% das partidas públicas são turbo, e a lista pública traz os heróis dos times zerados, por isso eles vêm dos detalhes.
 - As abas Itens, Habilidades e Dados profissionais foram conferidas pela acessibilidade com o app aberto, a API real e a fixture do Zeus: cabeçalho com herói, modo e patch; avisos de rank, posição, Turbo e Contra bots; amostra insuficiente nas builds e na ordem de habilidades; popularidade por fase e partidas profissionais recentes com dados reais.
+- Build real conferida pela acessibilidade com o app aberto, a API real e a fixture do Zeus: 3 vitórias profissionais (8 candidatas examinadas, 5 derrotas puladas sem buscar detalhes, 5 chamadas) com inventário, mochila, neutro com aprimoramento e a ordem de compra completa desde antes do início; 5 vitórias públicas de Escolha Livre com rank médio e, por não serem analisadas, só o inventário; a ordem real de habilidades de cada vitória profissional. O banco real migrou da versão 2 para a 3 mantendo o cache, o orçamento e o cursor.
 - A troca de herói ou de modo durante uma consulta é coberta por testes determinísticos do núcleo: a resposta antiga é descartada. Com a conferência de geração desligada de propósito, os dois testes falham.
 - Achados da API real registrados no README das fixtures: `/heroes/{hero_id}/matches` traz `account_id` e não traz os nomes dos times da especificação, e o inventário e a popularidade usam IDs numéricos de item, por isso o recorte embutido de itens guarda o `id` da origem.
 
@@ -202,8 +204,7 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - Conferência numa partida real com o jogo aberto, com captura de tela (#27), cobrindo também as abas de recomendação.
 - Conferência manual com a rede desligada: o fallback (cache antigo e "sem dados") é coberto por testes, mas não foi conferido no app.
 - Usar as partidas públicas contra bots (`lobby_type` 4) como fonte do modo Contra bots (#55).
-- Pela regra do item grande (receita e custo de pelo menos 2000), itens caros sem receita, como a Blink Dagger, não entram nas builds.
-- A amostra pública de Escolha Livre cresce devagar, porque a maioria das partidas públicas é turbo.
+- As vitórias públicas de Escolha Livre aparecem devagar, porque a maioria das partidas públicas é turbo.
 - Guardar o último modo de jogo confirmado entre execuções do app, junto das configurações no SQLite.
 
 ## Fase 4 — Pós-partida, histórico, notificações e empacotamento
@@ -273,3 +274,4 @@ Relatadas em duas partidas contra bots (Dragon Knight e Zeus), com 849 eventos, 
 - 2026-10-25 — Partidas de teste contra bots e turbo: o GSI não informa o modo de jogo. Decidida e incluída na Fase 3 a escolha manual do modo ao encontrar a partida, como pré-requisito das recomendações.
 - 2026-10-25 — Plano completo da Fase 3 revisado: builds profissionais e públicas por modo, algoritmo da build, orçamento de chamadas como política do app, coleta pública em segundo plano, migração do banco para a versão 2 e proteção contra respostas antigas. A STRATZ saiu da fase para a milestone "Fontes de dados extras".
 - 2026-10-25 — Fase 3 implementada: dados embutidos com custo, ID dos itens, IDs de habilidades e patches; agregação de builds; banco na versão 2; orçamento de chamadas; cliente HTTP com fallback; patch atual; builds profissionais; coleta pública em segundo plano; recomendações no núcleo com proteção contra respostas antigas; abas Itens, Habilidades e Dados profissionais. Falta a conferência numa partida real (#27) para concluir a fase.
+- 2026-10-25 — A pedido do mantenedor, a agregação de builds (item grande, amostra mínima, taxa de vitória e ordem de habilidades mais comum) foi substituída pela build real das vitórias mais recentes: 3 profissionais e 5 públicas do modo, com inventário final, mochila, neutro e ordem de compra completa, e a ordem real de habilidades (#56). O banco foi para a versão 3.

@@ -19,13 +19,13 @@ A aba **Herói** acompanha a partida pelo GSI:
 
 A aba **Itens** mostra recomendações para o herói e o modo da partida, com dados do [OpenDota](https://www.opendota.com/) do patch atual:
 
-- até 3 builds de partidas profissionais de liga e até 5 de partidas públicas do modo, da maior para a menor taxa de vitória observada, sempre com o número de partidas; em Turbo, avisa que partidas profissionais não são turbo, e Contra bots usa os dados de Escolha Livre;
-- uma build são os três primeiros itens grandes (com receita e custo de pelo menos 2000): em ordem de compra quando a partida foi analisada, ou os itens finais, sem ordem;
-- builds com menos de 10 partidas não aparecem, e a aba diz "amostra insuficiente";
+- as 3 vitórias mais recentes do herói em partidas profissionais de liga e as 5 mais recentes em partidas públicas do modo; em Turbo, avisa que partidas profissionais não são turbo, e Contra bots usa os dados de Escolha Livre;
+- a build real de cada vitória, como o jogador fez: inventário final, mochila, item neutro com o aprimoramento e, quando a partida foi analisada, a ordem de compra completa com o minuto de cada item; o aplicativo não monta builds nem esconde itens;
+- quando há menos vitórias recentes que o esperado, quantas foram encontradas;
 - os itens mais comprados por fase do jogo em partidas profissionais, como popularidade, não taxa de vitória;
-- informa a fonte, o patch e se os dados são antigos (guardados de uma consulta anterior), e que a recomendação não considera posição (1 a 5).
+- informa a fonte, o patch e se os dados são antigos (guardados de uma consulta anterior), e que as partidas não são separadas por posição (1 a 5).
 
-A aba **Habilidades** mostra a ordem de habilidades mais comum nos dez primeiros níveis em partidas profissionais do herói, e a aba **Dados profissionais**, as partidas profissionais recentes com ele (liga, resultado, data e duração).
+A aba **Habilidades** mostra a ordem em que as habilidades foram evoluídas em cada uma dessas vitórias profissionais, e a aba **Dados profissionais**, as partidas profissionais recentes com ele (liga, resultado, data e duração).
 
 As partidas públicas são coletadas em segundo plano enquanto o aplicativo está aberto. O aplicativo limita as próprias chamadas ao OpenDota (por padrão, 1.000 por dia, com até 700 para a coleta) e guarda as respostas no banco local.
 
