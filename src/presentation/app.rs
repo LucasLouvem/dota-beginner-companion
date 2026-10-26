@@ -140,30 +140,26 @@ impl Component for App {
     ) -> ComponentParts<Self> {
         let catalogs = RecommendationCatalogs {
             heroes: Arc::clone(&core.heroes),
-            items: Arc::clone(&core.items),
-            abilities: core.abilities,
         };
-        let recommendation_pages: Vec<(&str, String, Controller<RecommendationPage>)> = [
-            ("abilities", RecommendationTab::Abilities),
-            ("items", RecommendationTab::Items),
-            ("pro", RecommendationTab::ProMatches),
-        ]
-        .into_iter()
-        .map(|(name, tab)| {
-            let page = RecommendationPage::builder()
-                .launch(RecommendationPageInit {
-                    tab,
-                    catalogs: catalogs.clone(),
+        let recommendation_pages: Vec<(&str, String, Controller<RecommendationPage>)> =
+            [("pro", RecommendationTab::ProMatches)]
+                .into_iter()
+                .map(|(name, tab)| {
+                    let page = RecommendationPage::builder()
+                        .launch(RecommendationPageInit {
+                            tab,
+                            catalogs: catalogs.clone(),
+                        })
+                        .detach();
+                    (name, tab.title(), page)
                 })
-                .detach();
-            (name, tab.title(), page)
-        })
-        .collect();
+                .collect();
         let hero = HeroPage::builder()
             .launch(HeroPageInit {
                 commands: core.commands.clone(),
                 catalog: core.heroes,
                 items: core.items,
+                abilities: core.abilities,
             })
             .detach();
         let diagnostics = DiagnosticsPage::builder()

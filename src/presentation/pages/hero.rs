@@ -1,9 +1,11 @@
-//! Tela "Herói": herói do jogador com os dados embutidos, as estatísticas,
-//! os itens e as habilidades que o GSI informa e a linha do tempo da partida.
-//! Sem herói na partida atual, mostra a última partida terminada. Cada
-//! informação diz de onde vem: dado embutido, confirmado pelo GSI, inferido ou
-//! marcado pelo usuário. Quando uma partida é encontrada, pergunta o modo de
-//! jogo numa janela sobre o aplicativo.
+//! Tela "Herói": a página da build (vitórias recentes para escolher, com os
+//! itens e a ordem de habilidades acompanhados pela partida), o herói do
+//! jogador com os dados embutidos, as estatísticas, os itens e as
+//! habilidades que o GSI informa e a linha do tempo da partida. Sem herói na
+//! partida atual, mostra a última partida terminada. Cada informação diz de
+//! onde vem: dado embutido, confirmado pelo GSI, inferido ou marcado pelo
+//! usuário. Quando uma partida é encontrada, pergunta o modo de jogo numa
+//! janela sobre o aplicativo.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -15,7 +17,13 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::application::error::{Diagnostic, Redactor, ToDiagnostic, log_error};
 use crate::application::event_bus::{CoreConnectionError, UiCommand};
-use crate::application::state::{AppSnapshot, MatchStatus, ModeOrigin, ModeState, TimelineEntry};
+use crate::application::state::{
+    AppSnapshot, MatchStatus, ModeOrigin, ModeState, RecommendationStatus, TimelineEntry,
+};
+use crate::application::use_cases::item_icons::ItemIcons;
+use crate::application::use_cases::recommendation_request::RecommendationKey;
+use crate::application::use_cases::recommendations::{BuildId, Recommendations};
+use crate::domain::ability_catalog::AbilityIdCatalog;
 use crate::domain::game::{CarriedItem, GameMode, GamePhase, GameSnapshot, HeroPick, PlayerStats};
 use crate::domain::hero_catalog::{AttackType, HeroCatalog, HeroInfo, HeroRole, PrimaryAttribute};
 use crate::domain::item_catalog::ItemCatalog;
@@ -28,6 +36,11 @@ use crate::presentation::widgets::{
     status_row,
 };
 
+use super::build::{
+    BuildCatalogs, SidebarItem, build_detail, entry_at, header_rows, index_of, popularity_rows,
+    progress_row, sidebar, sidebar_items,
+};
+use super::build_panel::{BuildPanel, BuildView};
 use super::send_command;
 
 /// De onde vem a lista de habilidades exibida.
@@ -96,7 +109,17 @@ pub struct HeroPage {
     commands: UnboundedSender<UiCommand>,
     catalog: Arc<HeroCatalog>,
     items: Arc<ItemCatalog>,
+    abilities: Arc<AbilityIdCatalog>,
     match_status: MatchStatus,
+    recommendations: RecommendationStatus,
+    item_icons: Arc<ItemIcons>,
+    /// Build escolhida, com a consulta em que foi escolhida. Muda só pela
+    /// escolha na lista ou quando a consulta muda; nunca vai para o núcleo.
+    selection: Option<(RecommendationKey, BuildId)>,
+    /// Linhas da lista lateral e as recomendações de onde vieram, para não
+    /// refazer a lista a cada evento do GSI.
+    sidebar: Vec<SidebarItem>,
+    sidebar_source: Option<Arc<Recommendations>>,
     redactor: Redactor,
     /// Falha de comunicação com o núcleo, mostrada na própria página.
     core_failure: Option<CoreConnectionError>,
@@ -115,6 +138,8 @@ pub enum HeroMessage {
     MarkMatchFound,
     /// Botão "Alterar modo de jogo".
     ChangeMode,
+    /// Linha escolhida na lista de vitórias.
+    SelectBuildRow(i32),
     /// Resposta da pergunta do modo para a partida `match_number`.
     ChooseMode {
         match_number: u64,
@@ -128,12 +153,14 @@ pub struct HeroPageInit {
     pub commands: UnboundedSender<UiCommand>,
     pub catalog: Arc<HeroCatalog>,
     pub items: Arc<ItemCatalog>,
+    pub abilities: Arc<AbilityIdCatalog>,
 }
 
 /// Widgets da página, com o que cada lista mostra agora.
 pub struct HeroWidgets {
     mode: RowSection,
     change_mode_button: gtk::Button,
+    build: BuildPanel,
     hero_title: gtk::Label,
     hero: RowSection,
     stats: RowSection,
@@ -241,10 +268,11 @@ impl Component for HeroPage {
         title.add_css_class("title-1");
         title.set_xalign(0.0);
         let intro = gtk::Label::new(Some(&translate(
-            "Mostra o herói escolhido, suas estatísticas, itens, habilidades e o que \
-             aconteceu na partida. Depois que a partida termina, mostra o resumo dela até a \
-             próxima ser encontrada. Funções vêm dos dados embutidos e não indicam a posição \
-             (1 a 5) na partida.",
+            "Escolha uma vitória recente com o herói para acompanhar a build dela durante a \
+             partida: itens e ordem de habilidades, com o que você já comprou e aprendeu. \
+             Abaixo ficam o herói, as estatísticas, os itens, as habilidades e o que \
+             aconteceu na partida; depois que ela termina, o resumo fica até a próxima ser \
+             encontrada. Nada é enviado ao jogo.",
         )));
         intro.set_wrap(true);
         intro.set_xalign(0.0);
@@ -278,6 +306,13 @@ impl Component for HeroPage {
         }
         content.append(&change_mode_button);
 
+        let build = {
+            let select_sender = sender.clone();
+            BuildPanel::new(move |index| select_sender.input(HeroMessage::SelectBuildRow(index)))
+        };
+        content.append(&section_title(&translate("Build")));
+        content.append(build.widget());
+
         let hero_title = section_title("");
         let hero_list = boxed_list();
         content.append(&hero_title);
@@ -300,7 +335,7 @@ impl Component for HeroPage {
         content.append(&timeline_list);
 
         let clamp = adw::Clamp::builder()
-            .maximum_size(860)
+            .maximum_size(1200)
             .child(&content)
             .build();
         root.set_child(Some(&clamp));
@@ -309,7 +344,13 @@ impl Component for HeroPage {
             commands: init.commands,
             catalog: init.catalog,
             items: init.items,
+            abilities: init.abilities,
             match_status: MatchStatus::default(),
+            recommendations: RecommendationStatus::default(),
+            item_icons: Arc::default(),
+            selection: None,
+            sidebar: Vec::new(),
+            sidebar_source: None,
             redactor: Redactor::default(),
             core_failure: None,
             handled_match: 0,
@@ -318,6 +359,7 @@ impl Component for HeroPage {
         let mut widgets = HeroWidgets {
             mode: RowSection::new(mode_list),
             change_mode_button,
+            build,
             hero_title,
             hero: RowSection::new(hero_list),
             stats: RowSection::new(stats_list),
@@ -340,6 +382,8 @@ impl Component for HeroPage {
             HeroMessage::Snapshot(snapshot) => {
                 self.match_status = snapshot.match_status;
                 self.redactor = snapshot.redactor;
+                self.item_icons = snapshot.item_icons;
+                self.update_recommendations(snapshot.recommendations);
                 if let Some((match_number, preselected)) =
                     mode_dialog_request(&self.match_status, self.handled_match)
                 {
@@ -361,6 +405,13 @@ impl Component for HeroPage {
             }
             HeroMessage::CoreStopped => self.report_core_failure(CoreConnectionError::StateClosed),
             HeroMessage::MarkMatchFound => self.send(UiCommand::MarkMatchFound),
+            HeroMessage::SelectBuildRow(index) => {
+                if let (RecommendationStatus::Ready(recommendations), Some(id)) =
+                    (&self.recommendations, entry_at(&self.sidebar, index))
+                {
+                    self.selection = Some((recommendations.key.clone(), id));
+                }
+            }
             HeroMessage::ChangeMode => {
                 if let Some(current) = change_mode_preselection(&self.match_status) {
                     present_mode_dialog(
@@ -396,6 +447,31 @@ impl Component for HeroPage {
 }
 
 impl HeroPage {
+    /// Guarda as recomendações novas: refaz a lista lateral só quando elas
+    /// mudam e mantém a build escolhida enquanto a consulta for a mesma.
+    fn update_recommendations(&mut self, status: RecommendationStatus) {
+        match &status {
+            RecommendationStatus::Ready(recommendations) => {
+                let changed = !self
+                    .sidebar_source
+                    .as_ref()
+                    .is_some_and(|source| Arc::ptr_eq(source, recommendations));
+                if changed {
+                    self.sidebar = sidebar_items(&sidebar(&status, &self.items));
+                    self.sidebar_source = Some(Arc::clone(recommendations));
+                }
+                self.selection = recommendations
+                    .resolve_selection(self.selection.as_ref())
+                    .map(|id| (recommendations.key.clone(), id));
+            }
+            _ => {
+                self.sidebar = sidebar_items(&sidebar(&status, &self.items));
+                self.sidebar_source = None;
+            }
+        }
+        self.recommendations = status;
+    }
+
     fn send(&mut self, command: UiCommand) {
         if let Err(core_error) = send_command(&self.commands, command) {
             self.report_core_failure(core_error);
@@ -413,6 +489,44 @@ impl HeroPage {
         }
     }
 
+    /// Página da build: cabeçalho e lista não dependem da build escolhida;
+    /// a build é acompanhada pelo estado atual da partida.
+    fn render_build(&self, panel: &mut BuildPanel) {
+        let game = self.match_status.game.as_ref();
+        let catalogs = BuildCatalogs {
+            heroes: &self.catalog,
+            items: &self.items,
+            abilities: &self.abilities,
+        };
+        let (detail, popularity) = match &self.recommendations {
+            RecommendationStatus::Ready(recommendations) => (
+                self.selection
+                    .as_ref()
+                    .and_then(|(_, id)| build_detail(recommendations, id, game, &catalogs)),
+                popularity_rows(recommendations, &self.items, &self.redactor),
+            ),
+            _ => (None, Vec::new()),
+        };
+        let selected = self
+            .selection
+            .as_ref()
+            .and_then(|(_, id)| index_of(&self.sidebar, id));
+        panel.show(&BuildView {
+            header: header_rows(
+                &self.recommendations,
+                &self.match_status.mode,
+                &self.catalog,
+                &self.redactor,
+            ),
+            sidebar: &self.sidebar,
+            selected,
+            detail: detail.as_ref(),
+            progress: progress_row(game),
+            popularity,
+            icons: &self.item_icons,
+        });
+    }
+
     /// Atualiza só as linhas que mudaram desde o último estado exibido.
     fn render(&self, widgets: &mut HeroWidgets) {
         let core_failure = self
@@ -426,6 +540,7 @@ impl HeroPage {
             &self.items,
         );
         widgets.mode.show(content.mode);
+        self.render_build(&mut widgets.build);
         let can_change_mode = change_mode_preselection(&self.match_status).is_some();
         if widgets.change_mode_button.is_sensitive() != can_change_mode {
             widgets.change_mode_button.set_sensitive(can_change_mode);
@@ -788,6 +903,9 @@ pub fn slot_label(slot: &str) -> String {
         "slot6" | "slot7" | "slot8" => translate("Mochila"),
         "teleport0" => translate("Espaço do TP"),
         slot if slot.starts_with("stash") => translate("Stash"),
+        // O GSI põe o aprimoramento do neutro (`item_enhancement_*`) no
+        // segundo espaço neutro.
+        "neutral1" => translate("Aprimoramento neutro"),
         slot if slot.starts_with("neutral") => translate("Item neutro"),
         other => other.to_owned(),
     }

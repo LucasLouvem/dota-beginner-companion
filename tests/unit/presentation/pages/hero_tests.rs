@@ -817,3 +817,9 @@ fn cosmetic_abilities_are_hidden_and_unknown_hero_abilities_stay() {
     let names: Vec<&str> = lines.iter().map(|line| line.name.as_str()).collect();
     assert_eq!(names, ["Arc Lightning", "zuus_unknown"]);
 }
+
+#[test]
+fn second_neutral_slot_is_the_neutral_enhancement() {
+    assert_eq!(slot_label("neutral0"), "Item neutro");
+    assert_eq!(slot_label("neutral1"), "Aprimoramento neutro");
+}

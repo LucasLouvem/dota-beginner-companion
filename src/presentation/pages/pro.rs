@@ -9,7 +9,7 @@ use crate::domain::match_data::HeroMatch;
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{Level, RowContent, format_date, format_duration};
 
-use super::items::{ready_header, source_row, status_rows};
+use super::build::{ready_header, source_row, status_rows};
 
 /// Partidas mostradas, das mais recentes.
 pub const RECENT_MATCHES_SHOWN: usize = 10;

@@ -3,11 +3,11 @@
 
 use super::*;
 
-fn chip(time: Option<&str>, state: Option<StepState>) -> ItemChip {
+fn chip(time: Option<i32>, state: Option<StepState>) -> ItemChip {
     ItemChip {
         item: "item_blink".into(),
         label: "Blink Dagger".into(),
-        time: time.map(str::to_owned),
+        time,
         state,
     }
 }
@@ -15,14 +15,11 @@ fn chip(time: Option<&str>, state: Option<StepState>) -> ItemChip {
 #[test]
 fn caption_joins_the_state_marker_and_the_time() {
     assert_eq!(
-        chip_caption(&chip(Some("12:34"), Some(StepState::Done))),
+        chip_caption(&chip(Some(754), Some(StepState::Done))),
         "✓ 12:34"
     );
     assert_eq!(chip_caption(&chip(None, Some(StepState::Next))), "→");
-    assert_eq!(
-        chip_caption(&chip(Some("antes do início"), None)),
-        "antes do início"
-    );
+    assert_eq!(chip_caption(&chip(Some(-89), None)), "antes do início");
     assert_eq!(chip_caption(&chip(None, Some(StepState::Pending))), "");
 }
 

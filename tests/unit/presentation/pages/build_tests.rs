@@ -124,6 +124,10 @@ fn titles(rows: &[RowContent]) -> Vec<&str> {
     rows.iter().map(|row| row.title.as_str()).collect()
 }
 
+fn sidebar_of(status: &RecommendationStatus) -> Sidebar {
+    sidebar(status, &items())
+}
+
 fn header(status: &RecommendationStatus, mode: &ModeState) -> Vec<RowContent> {
     header_rows(status, mode, &heroes(), &Redactor::default())
 }
@@ -218,7 +222,7 @@ fn header_before_ready_explains_the_state() {
 
 #[test]
 fn sidebar_lists_professional_then_public_wins_with_final_items() {
-    let list = sidebar(&ready(listed(
+    let list = sidebar_of(&ready(listed(
         GameMode::AllPick,
         vec![pro_win(1, zeus_build(), None)],
     )));
@@ -226,7 +230,12 @@ fn sidebar_lists_professional_then_public_wins_with_final_items() {
     assert_eq!(list.pro[0].id, PRO);
     assert_eq!(list.pro[0].title, "Liga Teste");
     assert_eq!(list.pro[0].subtitle, "40:00");
-    assert_eq!(list.pro[0].items, ["item_blink", "item_black_king_bar"]);
+    let labels: Vec<&str> = list.pro[0]
+        .items
+        .iter()
+        .map(|chip| chip.label.as_str())
+        .collect();
+    assert_eq!(labels, ["Blink Dagger", "Black King Bar"]);
     assert_eq!(list.public[0].id, PUBLIC);
     assert_eq!(list.public[0].title, "Partida pública · Lenda 1");
     assert_eq!(list.empty, None);
@@ -235,12 +244,12 @@ fn sidebar_lists_professional_then_public_wins_with_final_items() {
 
 #[test]
 fn sidebar_without_wins_or_hero_explains_why() {
-    let no_wins = sidebar(&ready(recommendations(
+    let no_wins = sidebar_of(&ready(recommendations(
         GameMode::AllPick,
         pro_builds(vec![], 12, None),
         vec![],
     )));
-    let no_hero = sidebar(&RecommendationStatus::Idle);
+    let no_hero = sidebar_of(&RecommendationStatus::Idle);
 
     assert_eq!(
         no_wins.empty.unwrap().title,
@@ -306,7 +315,11 @@ fn analyzed_build_shows_starting_items_order_with_progress_and_windows() {
 
     assert!(build.notes.is_empty());
     assert_eq!(build.starting[0].label, "Tango");
-    assert_eq!(build.starting[0].time.as_deref(), Some("antes do início"));
+    assert_eq!(build.starting[0].time, Some(-89));
+    assert_eq!(
+        build.starting[0].accessible_label(),
+        "Tango, comprado antes do início"
+    );
     let order: Vec<(&str, Option<StepState>)> = build
         .order
         .iter()
@@ -325,7 +338,7 @@ fn analyzed_build_shows_starting_items_order_with_progress_and_windows() {
     assert_eq!(build.backpack[0].label, "Smoke of Deceit");
     assert_eq!(build.windows[0].0, "Antes do início");
     assert_eq!(build.windows[1].0, "De 10 a 25 minutos");
-    assert_eq!(build.windows[1].1[0].time.as_deref(), Some("12:34"));
+    assert_eq!(build.windows[1].1[0].time, Some(754));
 }
 
 #[test]
@@ -468,7 +481,7 @@ fn item_chip_reads_name_time_and_state() {
     let chip = ItemChip {
         item: "item_blink".into(),
         label: "Blink Dagger".into(),
-        time: Some("12:34".into()),
+        time: Some(754),
         state: Some(StepState::Next),
     };
     assert_eq!(
@@ -510,5 +523,114 @@ fn every_window_has_a_label() {
             "De 10 a 25 minutos",
             "Depois de 25 minutos"
         ]
+    );
+}
+
+#[test]
+fn sidebar_rows_put_a_title_before_each_group_and_map_rows_to_builds() {
+    let list = sidebar_of(&ready(listed(
+        GameMode::AllPick,
+        vec![pro_win(1, zeus_build(), None)],
+    )));
+
+    let items = sidebar_items(&list);
+
+    assert!(matches!(&items[0], SidebarItem::Group(title) if title == "Vitórias profissionais"));
+    assert!(matches!(&items[2], SidebarItem::Group(title) if title == "Vitórias públicas"));
+    assert_eq!(entry_at(&items, 1), Some(PRO));
+    assert_eq!(entry_at(&items, 3), Some(PUBLIC));
+    assert_eq!(entry_at(&items, 0), None, "título não é build");
+    assert_eq!(entry_at(&items, 9), None, "fora da lista");
+    assert_eq!(entry_at(&items, -1), None);
+    assert_eq!(index_of(&items, &PUBLIC), Some(3));
+}
+
+#[test]
+fn empty_sidebar_has_only_the_explanation() {
+    let items = sidebar_items(&sidebar_of(&RecommendationStatus::Idle));
+    assert_eq!(items.len(), 1);
+    assert!(matches!(items[0], SidebarItem::Empty(_)));
+    assert_eq!(entry_at(&items, 0), None);
+}
+
+#[test]
+fn rank_label_reads_medal_and_stars() {
+    assert_eq!(rank_label(51).as_deref(), Some("Lenda 1"));
+    assert_eq!(rank_label(10).as_deref(), Some("Arauto"));
+    assert_eq!(rank_label(80).as_deref(), Some("Imortal"));
+    assert_eq!(rank_label(0), None);
+    assert_eq!(rank_label(95), None);
+}
+
+#[test]
+fn purchase_before_the_start_has_no_clock() {
+    assert_eq!(purchase_time(-89), "antes do início");
+    assert_eq!(purchase_time(1300), "21:40");
+}
+
+#[test]
+fn popularity_lists_the_most_bought_items_by_phase_with_the_source() {
+    let ready = listed(GameMode::AllPick, vec![]);
+
+    let rows = popularity_rows(&ready, &items(), &Redactor::default());
+
+    assert_eq!(rows[0].title, "Início: item_branches, item_satanic");
+    assert_eq!(rows[1].level, Level::Warning, "dados antigos");
+}
+
+#[test]
+fn every_phase_has_a_label() {
+    let labels: Vec<String> = [
+        PopularityPhase::Start,
+        PopularityPhase::Early,
+        PopularityPhase::Mid,
+        PopularityPhase::Late,
+    ]
+    .into_iter()
+    .map(phase_label)
+    .collect();
+    assert_eq!(
+        labels,
+        [
+            "Início",
+            "Até 10 minutos",
+            "De 10 a 25 minutos",
+            "Depois de 25 minutos"
+        ]
+    );
+}
+
+#[test]
+fn ability_names_fall_back_to_internal_name_and_id() {
+    let abilities = AbilityIdCatalog::new(HashMap::from([
+        (5110, "zuus_arc_lightning".to_owned()),
+        (7000, "zuus_new_ability".to_owned()),
+        (6000, "special_bonus_spell_amplify_8".to_owned()),
+    ]));
+    assert_eq!(ability_name(5110, &heroes(), &abilities), "Arc Lightning");
+    assert_eq!(
+        ability_name(7000, &heroes(), &abilities),
+        "zuus_new_ability"
+    );
+    assert_eq!(ability_name(6000, &heroes(), &abilities), "Talento");
+    assert_eq!(ability_name(1, &heroes(), &abilities), "habilidade 1");
+}
+
+#[test]
+fn loading_header_names_the_hero_and_mode() {
+    let loading = RecommendationStatus::Loading {
+        key: crate::application::use_cases::recommendation_request::RecommendationKey {
+            hero_id: 22,
+            mode: GameMode::Turbo,
+            patch_id: 60,
+        },
+    };
+    assert_eq!(
+        header(&loading, &ModeState::NotAsked),
+        vec![RowContent::new(
+            Level::Info,
+            "Carregando recomendações de Zeus",
+            "Turbo"
+        )]
     );
 }

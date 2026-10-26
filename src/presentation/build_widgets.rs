@@ -9,7 +9,7 @@ use relm4::gtk::{self, gdk, glib, prelude::*};
 use crate::application::use_cases::item_icons::ItemIcons;
 use crate::domain::build_progress::StepState;
 
-use super::pages::build::{AbilityGrid, ItemChip};
+use super::pages::build::{AbilityGrid, ItemChip, purchase_time};
 use super::widgets::{RowChange, list_changes};
 
 /// Lado da imagem do item, em pixels.
@@ -51,8 +51,8 @@ struct ChipWidget {
 }
 
 impl ChipWidget {
-    fn new() -> Self {
-        let image = gtk::Image::builder().pixel_size(ICON_SIZE).build();
+    fn new(icon_size: i32) -> Self {
+        let image = gtk::Image::builder().pixel_size(icon_size).build();
         let name = gtk::Label::builder()
             .wrap(true)
             .max_width_chars(10)
@@ -119,7 +119,8 @@ impl ChipWidget {
 
 /// Texto embaixo da imagem: o símbolo da situação e o minuto da compra.
 pub fn chip_caption(chip: &ItemChip) -> String {
-    [chip.marker(), chip.time.as_deref().unwrap_or_default()]
+    let time = chip.time.map(purchase_time).unwrap_or_default();
+    [chip.marker(), time.as_str()]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -129,6 +130,7 @@ pub fn chip_caption(chip: &ItemChip) -> String {
 /// Faixa de itens que quebra a linha quando falta espaço.
 pub struct ItemStrip {
     flow: gtk::FlowBox,
+    icon_size: i32,
     chips: Vec<ChipWidget>,
     /// O que cada chip mostra agora, com a presença da imagem.
     shown: Vec<(ItemChip, bool)>,
@@ -136,6 +138,10 @@ pub struct ItemStrip {
 
 impl ItemStrip {
     pub fn new() -> Self {
+        Self::with_icon_size(ICON_SIZE)
+    }
+
+    pub fn with_icon_size(icon_size: i32) -> Self {
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(false)
@@ -145,6 +151,7 @@ impl ItemStrip {
             .build();
         Self {
             flow,
+            icon_size,
             chips: Vec::new(),
             shown: Vec::new(),
         }
@@ -172,7 +179,7 @@ impl ItemStrip {
                 }
                 RowChange::Append(index) => {
                     let (chip, texture) = &content[index];
-                    let widget = ChipWidget::new();
+                    let widget = ChipWidget::new(self.icon_size);
                     widget.show(chip, texture.as_ref());
                     self.flow.append(&widget.child);
                     self.chips.push(widget);
