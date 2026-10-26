@@ -224,3 +224,26 @@ fn clock_outside_the_supported_range_is_no_data() {
     let snapshot = game_snapshot(&json!({ "map": { "clock_time": i64::MAX } }));
     assert_eq!(snapshot.clock_time, None);
 }
+
+#[test]
+fn counts_the_learned_talents() {
+    let snapshot = game_snapshot(&json!({ "hero": {
+        "name": "npc_dota_hero_drow_ranger",
+        "talent_1": false, "talent_2": true, "talent_3": false, "talent_4": true,
+        "talent_5": false, "talent_6": false, "talent_7": false, "talent_8": false,
+        "attributes_level": 2,
+    }}));
+    assert_eq!(snapshot.talents_learned, Some(2));
+}
+
+#[test]
+fn talents_are_no_data_when_the_hero_block_has_none() {
+    let without_talents = game_snapshot(&json!({ "hero": { "name": "npc_dota_hero_zuus" } }));
+    assert_eq!(without_talents.talents_learned, None);
+    let wrong_type = game_snapshot(&json!({ "hero": { "talent_1": "sim", "talent_2": true } }));
+    assert_eq!(
+        wrong_type.talents_learned,
+        Some(1),
+        "valor fora do tipo não conta"
+    );
+}

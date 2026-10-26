@@ -50,6 +50,7 @@ pub fn game_snapshot(payload: &Value) -> GameSnapshot {
             .and_then(MatchId::from_gsi),
         hero: hero.map_or(HeroPick::NotPicked, hero_pick),
         hero_level: hero.and_then(|hero| number(hero, "level")),
+        talents_learned: hero.and_then(talents_learned),
         hero_alive: hero
             .and_then(|hero| hero.get("alive"))
             .and_then(Value::as_bool),
@@ -75,6 +76,22 @@ fn hero_pick(hero: &Map<String, Value>) -> HeroPick {
         },
         _ => HeroPick::NotPicked,
     }
+}
+
+/// Quantos `talent_N` estão marcados; `None` sem nenhum campo de talento.
+fn talents_learned(hero: &Map<String, Value>) -> Option<u32> {
+    let talents: Vec<bool> = hero
+        .iter()
+        .filter(|(key, _)| {
+            key.strip_prefix("talent_")
+                .is_some_and(|index| index.parse::<u32>().is_ok())
+        })
+        .map(|(_, value)| value.as_bool().unwrap_or_default())
+        .collect();
+    if talents.is_empty() {
+        return None;
+    }
+    Some(talents.iter().filter(|learned| **learned).count() as u32)
 }
 
 fn player_stats(player: &Map<String, Value>) -> PlayerStats {

@@ -166,6 +166,9 @@ pub struct GameSnapshot {
     pub match_id: Option<MatchId>,
     pub hero: HeroPick,
     pub hero_level: Option<u32>,
+    /// Talentos já escolhidos (`hero.talent_1..8` verdadeiros); `None` quando
+    /// o Dota não envia os talentos.
+    pub talents_learned: Option<u32>,
     pub hero_alive: Option<bool>,
     pub team: Option<Team>,
     /// Time vencedor; só existe depois que o Dota informa `win_team`.
@@ -187,6 +190,7 @@ impl GameSnapshot {
             match_id: None,
             hero: HeroPick::NotPicked,
             hero_level: None,
+            talents_learned: None,
             hero_alive: None,
             team: None,
             winner: None,
