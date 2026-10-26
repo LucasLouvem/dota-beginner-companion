@@ -6,8 +6,11 @@ use crate::application::ports::{BoxFuture, ConnectionTestError, GsiRecordError, 
 use crate::application::ports::{
     CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
 };
+use crate::application::ports::{ItemIconError, ItemIconSource, ItemIconStore};
 use crate::application::state::{GsiLogStatus, ModeOrigin, ModeState, RecommendationStatus};
-use crate::domain::game::{GameMode, GamePhase, GameSnapshot, HeroPick};
+use crate::application::use_cases::item_icons::IconSources;
+use crate::domain::game::{CarriedItem, GameMode, GamePhase, GameSnapshot, HeroPick};
+use crate::domain::item_catalog::{ItemCatalog, ItemInfo};
 use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
 use crate::domain::match_events::{MatchEvent, MatchEventKind, Provenance};
 use crate::domain::patch::{Patch, PatchCatalog};
@@ -18,7 +21,7 @@ use crate::test_support::{
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 /// Tempo máximo de espera por uma mudança de estado.
 const STATE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -100,6 +103,7 @@ fn dependencies() -> CoreDependencies {
             token: "token".into(),
         },
         external: None,
+        icons: None,
     }
 }
 
@@ -955,4 +959,94 @@ async fn returning_to_the_menu_without_last_match_makes_recommendations_idle() {
         matches!(snapshot.recommendations, RecommendationStatus::Idle)
     })
     .await;
+}
+
+/// Fonte de imagens que conta os pedidos e devolve um PNG falso.
+#[derive(Default)]
+struct CountingIcons {
+    fetches: AtomicU32,
+}
+
+impl ItemIconSource for CountingIcons {
+    fn fetch<'a>(&'a self, _image_path: &'a str) -> BoxFuture<'a, Result<Vec<u8>, ItemIconError>> {
+        Box::pin(async move {
+            self.fetches.fetch_add(1, Ordering::SeqCst);
+            Ok(b"png".to_vec())
+        })
+    }
+}
+
+/// Cache que nunca tem nada guardado e aceita qualquer gravação.
+struct NoCache;
+
+impl ItemIconStore for NoCache {
+    fn load(&self, _item: &str) -> Result<Option<Vec<u8>>, ItemIconError> {
+        Ok(None)
+    }
+
+    fn save(&self, _item: &str, _png: &[u8]) -> Result<(), ItemIconError> {
+        Ok(())
+    }
+}
+
+fn carrying_blink() -> CoreEvent {
+    CoreEvent::GsiAccepted {
+        raw: "{}".into(),
+        at: SystemTime::now(),
+        is_test: false,
+        game: Some(Box::new(GameSnapshot {
+            inventory: Some(vec![CarriedItem {
+                slot: "slot0".into(),
+                name: "item_blink".into(),
+            }]),
+            ..GameSnapshot::menu()
+        })),
+    }
+}
+
+#[tokio::test]
+async fn icons_of_carried_items_are_published_and_requested_once() {
+    let source = Arc::new(CountingIcons::default());
+    let items = ItemCatalog::new(vec![ItemInfo {
+        id: 1,
+        name: "item_blink".into(),
+        display_name: "Blink Dagger".into(),
+        cost: None,
+        components: vec![],
+        image_path: Some("/apps/dota2/images/dota_react/items/blink.png".into()),
+    }]);
+    let mut core = start(
+        CoreDependencies {
+            icons: Some(IconSources {
+                source: source.clone(),
+                store: Arc::new(NoCache),
+                items: Arc::new(items),
+            }),
+            ..dependencies()
+        },
+        AppSnapshot::default(),
+    );
+
+    core.events.send(carrying_blink()).await.unwrap();
+    let snapshot = wait_for(&mut core.state, |snapshot| {
+        snapshot.item_icons.contains_key("item_blink")
+    })
+    .await;
+    core.events.send(carrying_blink()).await.unwrap();
+    core.events.send(dota_event()).await.unwrap();
+    wait_for(&mut core.state, |snapshot| {
+        snapshot
+            .match_status
+            .game
+            .as_ref()
+            .is_some_and(|game| game.inventory.is_none())
+    })
+    .await;
+
+    assert_eq!(&**snapshot.item_icons.get("item_blink").unwrap(), b"png");
+    assert_eq!(
+        source.fetches.load(Ordering::SeqCst),
+        1,
+        "o mesmo item não é pedido de novo"
+    );
 }

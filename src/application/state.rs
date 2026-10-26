@@ -14,6 +14,7 @@ use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText};
 use super::event_bus::{GsiServerError, RejectReason};
 use super::ports::{ConnectionTestError, GsiRecordError, SharedError};
 use super::use_cases::install_gsi_config::InstallError;
+use super::use_cases::item_icons::ItemIcons;
 use super::use_cases::recommendation_request::RecommendationKey;
 use super::use_cases::recommendations::Recommendations;
 
@@ -257,4 +258,7 @@ pub struct AppSnapshot {
     /// Remove o token dos diagnósticos exibidos.
     pub redactor: Redactor,
     pub recommendations: RecommendationStatus,
+    /// Imagens dos itens já carregadas, pelo nome interno. O `Arc` mantém a
+    /// cópia do estado barata; o mapa só é trocado quando chegam imagens.
+    pub item_icons: Arc<ItemIcons>,
 }

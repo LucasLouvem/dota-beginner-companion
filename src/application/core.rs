@@ -1,6 +1,7 @@
 //! Laço principal: recebe eventos dos adaptadores e comandos da interface,
 //! executa os casos de uso e publica o novo `AppSnapshot`.
 
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
@@ -24,6 +25,9 @@ use super::state::{
 use super::use_cases::current_patch::load_current_patch;
 use super::use_cases::external_sources::ExternalSources;
 use super::use_cases::install_gsi_config::install_gsi_config;
+use super::use_cases::item_icons::{
+    IconBytes, IconSources, carried_items, load_icons, status_items,
+};
 use super::use_cases::recommendation_request::{RequestTicket, RequestTracker};
 use super::use_cases::recommendations::{Recommendations, desired_key, load_recommendations};
 use super::use_cases::record_gsi_event::record_gsi_event;
@@ -87,6 +91,78 @@ pub struct CoreDependencies {
     /// Fontes das recomendações; ausentes quando o banco local ou o cliente
     /// HTTP não puderam ser abertos.
     pub external: Option<ExternalSources>,
+    /// Imagens dos itens; ausentes quando a pasta de cache ou o cliente HTTP
+    /// não estão disponíveis.
+    pub icons: Option<IconSources>,
+}
+
+/// Imagens pedidas e ainda não publicadas. Cada item é pedido uma única vez
+/// por execução: uma falha não é repetida até a próxima abertura.
+struct IconRuntime {
+    sources: IconSources,
+    requested: HashSet<String>,
+    /// Recomendações cujos itens já foram pedidos, para não percorrer as
+    /// builds a cada evento do GSI.
+    seen_recommendations: Option<Arc<Recommendations>>,
+    sender: mpsc::UnboundedSender<Vec<(String, IconBytes)>>,
+}
+
+impl IconRuntime {
+    fn new(sources: IconSources, sender: mpsc::UnboundedSender<Vec<(String, IconBytes)>>) -> Self {
+        Self {
+            sources,
+            requested: HashSet::new(),
+            seen_recommendations: None,
+            sender,
+        }
+    }
+
+    /// Pede as imagens novas: as do inventário atual e, quando as
+    /// recomendações mudaram, as das builds.
+    fn refresh(&mut self, snapshot: &AppSnapshot) {
+        let mut wanted: BTreeSet<String> = snapshot
+            .match_status
+            .game
+            .as_ref()
+            .map(carried_items)
+            .unwrap_or_default();
+        if let RecommendationStatus::Ready(recommendations) = &snapshot.recommendations {
+            let changed = !self
+                .seen_recommendations
+                .as_ref()
+                .is_some_and(|seen| Arc::ptr_eq(seen, recommendations));
+            if changed {
+                self.seen_recommendations = Some(Arc::clone(recommendations));
+                wanted.extend(status_items(&snapshot.recommendations));
+            }
+        }
+        let missing: Vec<String> = wanted
+            .into_iter()
+            .filter(|item| self.requested.insert(item.clone()))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let sources = self.sources.clone();
+        let sender = self.sender.clone();
+        tokio::spawn(async move {
+            let loaded = load_icons(&sources, missing).await;
+            if !loaded.is_empty() {
+                // Canal fechado só no encerramento do runtime; nada a fazer.
+                let _ = sender.send(loaded);
+            }
+        });
+    }
+}
+
+/// Junta as imagens carregadas ao estado, num mapa novo: o `Arc` antigo
+/// continua válido para quem já o leu.
+fn publish_icons(state: &watch::Sender<AppSnapshot>, loaded: Vec<(String, IconBytes)>) {
+    state.send_modify(|snapshot| {
+        let mut icons = (*snapshot.item_icons).clone();
+        icons.extend(loaded);
+        snapshot.item_icons = Arc::new(icons);
+    });
 }
 
 /// Resultado das tarefas de recomendação, entregue ao laço do núcleo.
@@ -233,6 +309,11 @@ pub async fn run(
         .external
         .clone()
         .map(|sources| RecommendationRuntime::start(sources, recommendation_sender, &state));
+    let (icon_sender, mut icon_receiver) = mpsc::unbounded_channel();
+    let mut icons = dependencies
+        .icons
+        .clone()
+        .map(|sources| IconRuntime::new(sources, icon_sender));
     loop {
         tokio::select! {
             Some(event) = events.recv() => {
@@ -255,6 +336,9 @@ pub async fn run(
                 if let Some(runtime) = &mut recommendations {
                     runtime.refresh(&state);
                 }
+                if let Some(runtime) = &mut icons {
+                    runtime.refresh(&state.borrow());
+                }
             }
             Some(command) = commands.recv() => {
                 handle_command(&dependencies, &state, &rounds, command);
@@ -266,7 +350,11 @@ pub async fn run(
                 if let Some(runtime) = &mut recommendations {
                     runtime.handle(message, &state);
                 }
+                if let Some(runtime) = &mut icons {
+                    runtime.refresh(&state.borrow());
+                }
             }
+            Some(loaded) = icon_receiver.recv() => publish_icons(&state, loaded),
             _ = ticker.tick() => spawn_diagnostics(&dependencies, &state, &rounds),
         }
     }

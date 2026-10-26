@@ -9,20 +9,25 @@ use tokio::sync::{mpsc, watch};
 
 use dota_companion::application::core::{self, CoreDependencies};
 use dota_companion::application::error::{Redactor, ToDiagnostic, log_error, log_warning};
-use dota_companion::application::ports::{CacheStore, CallBudget, PublicBuildStore, StatsProvider};
+use dota_companion::application::ports::{
+    CacheStore, CallBudget, ItemIconSource, ItemIconStore, PublicBuildStore, StatsProvider,
+};
 use dota_companion::application::state::{AppSnapshot, GsiLogStatus};
 use dota_companion::application::use_cases::call_budget::BudgetLimits;
 use dota_companion::application::use_cases::external_sources::ExternalSources;
+use dota_companion::application::use_cases::item_icons::IconSources;
 use dota_companion::application::use_cases::public_collection::run_collection;
 use dota_companion::domain::ability_catalog::AbilityIdCatalog;
 use dota_companion::domain::gsi_config::GsiEndpoint;
 use dota_companion::domain::hero_catalog::HeroCatalog;
 use dota_companion::domain::item_catalog::ItemCatalog;
+use dota_companion::infrastructure::item_icon_cache::ItemIconCache;
 use dota_companion::infrastructure::{config, logging};
 use dota_companion::presentation::app::{App, CoreHandle};
 use dota_companion::presentation::widgets::diagnostic_text;
 use dota_companion::providers::http_json::{HttpJsonClient, HttpJsonConfig};
 use dota_companion::providers::opendota::OpenDotaProvider;
+use dota_companion::providers::steam_cdn::{SteamCdnConfig, SteamCdnIcons};
 use dota_companion::storage::call_budget::SqliteCallBudget;
 use dota_companion::storage::public_builds::SqlitePublicBuildStore;
 use dota_companion::storage::sqlite_cache::SqliteCacheStore;
@@ -103,6 +108,7 @@ fn main() -> anyhow::Result<()> {
         items: Arc::clone(&items),
         endpoint: endpoint.clone(),
         external: external.clone(),
+        icons: icon_sources(&items),
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -209,6 +215,28 @@ fn external_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<Externa
         store: Arc::new(store) as Arc<dyn PublicBuildStore>,
         cache: Arc::new(cache) as Arc<dyn CacheStore>,
         embedded_patches,
+    })
+}
+
+/// Imagens dos itens (CDN da Steam com cache em disco), ou `None` (com o
+/// motivo no log): os itens aparecem pelo nome.
+fn icon_sources(items: &Arc<ItemCatalog>) -> Option<IconSources> {
+    let Some(dir) = ItemIconCache::default_dir() else {
+        tracing::warn!("item icons disabled: no user cache folder");
+        return None;
+    };
+    let source = SteamCdnIcons::new(SteamCdnConfig::default())
+        .map_err(|client_error| {
+            log_warning(
+                &client_error.to_diagnostic(&Redactor::default()),
+                "item icons disabled: items are shown by name",
+            );
+        })
+        .ok()?;
+    Some(IconSources {
+        source: Arc::new(source) as Arc<dyn ItemIconSource>,
+        store: Arc::new(ItemIconCache::new(dir)) as Arc<dyn ItemIconStore>,
+        items: Arc::clone(items),
     })
 }
 
