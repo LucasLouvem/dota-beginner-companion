@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use crate::application::ports::{
     BoxFuture, CallBudget, CallCategory, ProviderError, StatsProvider, StatsQuery,
 };
-use crate::domain::builds::Purchase;
+use crate::domain::builds::{PlayerBuild, Purchase, in_purchase_order};
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::{
     HeroMatch, ItemPopularity, MatchDetails, MatchPlayer, PopularityPhase, PublicMatchSummary,
@@ -42,7 +42,7 @@ const MATCH_FIELDS: [&str; 7] = [
     "start_time",
     "radiant_win",
 ];
-const PLAYER_FIELDS: [&str; 12] = [
+const PLAYER_FIELDS: [&str; 17] = [
     "hero_id",
     "win",
     "patch",
@@ -54,6 +54,11 @@ const PLAYER_FIELDS: [&str; 12] = [
     "item_3",
     "item_4",
     "item_5",
+    "backpack_0",
+    "backpack_1",
+    "backpack_2",
+    "item_neutral",
+    "item_neutral2",
     "isRadiant",
 ];
 
@@ -281,21 +286,7 @@ fn decode_player(player: &Value, items: &ItemCatalog) -> Option<MatchPlayer> {
             .and_then(Value::as_u64)
             .map(|win| win == 1),
         patch_id: unsigned(player, "patch"),
-        purchase_log: player
-            .get("purchase_log")
-            .and_then(Value::as_array)
-            .map(|log| {
-                log.iter()
-                    .filter_map(|purchase| {
-                        Some(Purchase {
-                            // A chave vem sem o prefixo usado pelo GSI.
-                            item: format!("item_{}", purchase.get("key")?.as_str()?),
-                            time: i32::try_from(purchase.get("time")?.as_i64()?).ok()?,
-                        })
-                    })
-                    .collect()
-            }),
-        final_items: final_items(player, items),
+        build: player_build(player, items),
         ability_upgrades: player
             .get("ability_upgrades_arr")
             .and_then(Value::as_array)
@@ -308,23 +299,48 @@ fn decode_player(player: &Value, items: &ItemCatalog) -> Option<MatchPlayer> {
     })
 }
 
-/// Itens de `item_0..5` pelo catálogo; 0 é espaço vazio e ID desconhecido
-/// fica de fora. Sem nenhum dos campos, a fonte não trouxe o inventário.
-fn final_items(player: &Value, items: &ItemCatalog) -> Option<Vec<String>> {
-    let slots: Vec<u64> = (0..6)
-        .filter_map(|slot| player.get(format!("item_{slot}"))?.as_u64())
-        .collect();
-    if slots.is_empty() {
+/// Build real do jogador. O inventário (`item_0..5`) é obrigatório: sem
+/// nenhum desses campos, a fonte não trouxe a build. Mochila, neutro e
+/// compras ausentes ficam vazios.
+fn player_build(player: &Value, items: &ItemCatalog) -> Option<PlayerBuild> {
+    let has_inventory = (0..6).any(|slot| player.get(format!("item_{slot}")).is_some());
+    if !has_inventory {
         return None;
     }
-    Some(
-        slots
-            .into_iter()
-            .filter(|id| *id != 0)
-            .filter_map(|id| items.by_id(u32::try_from(id).ok()?))
-            .map(|item| item.name.clone())
-            .collect(),
-    )
+    let slots = |prefix: &str, count: usize| -> Vec<String> {
+        (0..count)
+            .filter_map(|slot| item_in(player, &format!("{prefix}{slot}"), items))
+            .collect()
+    };
+    Some(PlayerBuild {
+        inventory: slots("item_", 6),
+        backpack: slots("backpack_", 3),
+        neutral: item_in(player, "item_neutral", items),
+        neutral_enhancement: item_in(player, "item_neutral2", items),
+        purchases: player
+            .get("purchase_log")
+            .and_then(Value::as_array)
+            .map(|log| {
+                in_purchase_order(
+                    log.iter()
+                        .filter_map(|purchase| {
+                            Some(Purchase {
+                                // A chave vem sem o prefixo usado pelo GSI.
+                                item: format!("item_{}", purchase.get("key")?.as_str()?),
+                                time: i32::try_from(purchase.get("time")?.as_i64()?).ok()?,
+                            })
+                        })
+                        .collect(),
+                )
+            }),
+    })
+}
+
+/// Item de um espaço pelo catálogo: 0 é espaço vazio, e ID desconhecido
+/// fica de fora.
+fn item_in(player: &Value, field: &str, items: &ItemCatalog) -> Option<String> {
+    let id = unsigned(player, field).filter(|id| *id != 0)?;
+    items.by_id(id).map(|item| item.name.clone())
 }
 
 /// Mantém só os campos usados da partida e dos jogadores.

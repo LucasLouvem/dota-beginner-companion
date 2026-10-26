@@ -350,3 +350,24 @@ fn expensive_item_without_recipe_is_not_part_of_the_build() {
         ordered(&["item_black_king_bar", "item_desolator", "item_satanic"])
     );
 }
+
+#[test]
+fn purchases_follow_time_order_and_keep_repeated_and_pre_game_ones() {
+    let ordered = in_purchase_order(vec![
+        buy("item_blink", 600),
+        buy("item_tango", -89),
+        buy("item_ward_observer", 600),
+        buy("item_tango", 300),
+    ]);
+
+    assert_eq!(
+        ordered,
+        [
+            buy("item_tango", -89),
+            buy("item_tango", 300),
+            buy("item_blink", 600),
+            buy("item_ward_observer", 600),
+        ],
+        "mesmo horário mantém a ordem da fonte"
+    );
+}

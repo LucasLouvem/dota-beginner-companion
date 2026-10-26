@@ -5,7 +5,7 @@ use super::*;
 use crate::application::ports::{
     BudgetError, BudgetExhausted, BudgetLimit, CacheStore, CallBudget,
 };
-use crate::domain::builds::{BuildEvidence, BuildKey, Purchase};
+use crate::domain::builds::{BuildEvidence, BuildKey, PlayerBuild, Purchase};
 use crate::domain::item_catalog::ItemInfo;
 use crate::domain::match_data::MatchPlayer;
 use crate::test_support::{
@@ -54,21 +54,23 @@ fn zeus(won: bool) -> MatchPlayer {
         hero_id: ZEUS,
         won: Some(won),
         patch_id: Some(PATCH),
-        purchase_log: Some(vec![
-            Purchase {
-                item: "item_black_king_bar".into(),
-                time: 900,
-            },
-            Purchase {
-                item: "item_desolator".into(),
-                time: 1300,
-            },
-            Purchase {
-                item: "item_satanic".into(),
-                time: 1800,
-            },
-        ]),
-        final_items: Some(vec![]),
+        build: Some(PlayerBuild {
+            purchases: Some(vec![
+                Purchase {
+                    item: "item_black_king_bar".into(),
+                    time: 900,
+                },
+                Purchase {
+                    item: "item_desolator".into(),
+                    time: 1300,
+                },
+                Purchase {
+                    item: "item_satanic".into(),
+                    time: 1800,
+                },
+            ]),
+            ..PlayerBuild::default()
+        }),
         ability_upgrades: Some(vec![1, 2, 1, 3, 1, 4, 1, 2, 2, 2]),
     }
 }
@@ -224,7 +226,7 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
     setup.details(details(
         5,
         MatchPlayer {
-            purchase_log: None,
+            build: Some(PlayerBuild::default()),
             ..zeus(true)
         },
     ));

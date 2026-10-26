@@ -146,7 +146,7 @@ fn hero_match_without_numeric_match_id_is_left_out() {
 }
 
 #[test]
-fn real_match_details_have_the_zeus_purchases_items_and_abilities() {
+fn real_match_details_have_the_zeus_full_build_and_abilities() {
     let details = decode_match_details(MATCH_RESPONSE, &items()).unwrap();
 
     assert_eq!(details.match_id, 9_055_224_065);
@@ -158,7 +158,21 @@ fn real_match_details_have_the_zeus_purchases_items_and_abilities() {
     let zeus = details.player_with_hero(22).unwrap();
     assert_eq!(zeus.won, Some(true));
     assert_eq!(details.patch_of(zeus), Some(60));
-    let purchases = zeus.purchase_log.as_ref().unwrap();
+    let build = zeus.build.as_ref().unwrap();
+    assert_eq!(build.inventory[0], "item_refresher");
+    assert_eq!(build.inventory.len(), 5, "o espaço vazio (0) fica de fora");
+    assert_eq!(build.backpack, ["item_smoke_of_deceit"]);
+    assert_eq!(build.neutral.as_deref(), Some("item_partisans_brand"));
+    assert_eq!(
+        build.neutral_enhancement.as_deref(),
+        Some("item_enhancement_greedy")
+    );
+    let purchases = build.purchases.as_ref().unwrap();
+    assert_eq!(
+        purchases.len(),
+        39,
+        "todas as compras, inclusive consumíveis"
+    );
     assert_eq!(
         purchases[0],
         Purchase {
@@ -166,9 +180,12 @@ fn real_match_details_have_the_zeus_purchases_items_and_abilities() {
             time: -89
         }
     );
-    let final_items = zeus.final_items.as_ref().unwrap();
-    assert_eq!(final_items[0], "item_refresher");
-    assert_eq!(final_items.len(), 5, "o espaço vazio (0) fica de fora");
+    assert!(
+        purchases
+            .windows(2)
+            .all(|pair| pair[0].time <= pair[1].time),
+        "em ordem de horário"
+    );
     assert_eq!(
         zeus.ability_upgrades.as_ref().unwrap()[..3],
         [5111, 641, 5111]
@@ -176,23 +193,47 @@ fn real_match_details_have_the_zeus_purchases_items_and_abilities() {
 }
 
 #[test]
-fn unknown_item_id_and_empty_slot_are_left_out_and_missing_slots_are_unknown() {
+fn unknown_item_id_and_empty_slot_are_left_out_and_missing_inventory_is_no_build() {
     let details = decode_match_details(
         r#"{"match_id": 1, "players": [
-            {"hero_id": 22, "item_0": 110, "item_1": 0, "item_2": 999999},
-            {"hero_id": 49}
+            {"hero_id": 22, "item_0": 110, "item_1": 0, "item_2": 999999,
+             "backpack_0": 0, "item_neutral": 0},
+            {"hero_id": 49, "backpack_0": 188, "item_neutral": 1873}
         ]}"#,
         &items(),
     )
     .unwrap();
 
     assert_eq!(
-        details.players[0].final_items,
-        Some(vec!["item_refresher".to_owned()])
+        details.players[0].build,
+        Some(PlayerBuild {
+            inventory: vec!["item_refresher".to_owned()],
+            ..PlayerBuild::default()
+        }),
+        "mochila e neutro vazios; sem registro de compras"
     );
-    assert_eq!(details.players[1].final_items, None);
+    assert_eq!(details.players[1].build, None, "sem item_0..5");
     assert!(!details.parsed);
-    assert_eq!(details.players[1].purchase_log, None);
+}
+
+#[test]
+fn purchases_are_put_in_time_order() {
+    let details = decode_match_details(
+        r#"{"match_id": 1, "players": [{"hero_id": 22, "item_0": 0, "purchase_log": [
+            {"time": 600, "key": "blink"}, {"time": -30, "key": "tango"},
+            {"time": 600, "key": "ward_observer"}, {"key": "sem_horario"}
+        ]}]}"#,
+        &items(),
+    )
+    .unwrap();
+
+    let purchases = details.players[0].build.as_ref().unwrap().purchases.clone();
+    let names: Vec<String> = purchases
+        .unwrap()
+        .into_iter()
+        .map(|purchase| purchase.item)
+        .collect();
+    assert_eq!(names, ["item_tango", "item_blink", "item_ward_observer"]);
 }
 
 #[test]

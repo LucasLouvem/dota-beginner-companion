@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit, CallBudget};
-use crate::domain::builds::{BuildEvidence, Purchase};
+use crate::domain::builds::{BuildEvidence, PlayerBuild, Purchase};
 use crate::domain::item_catalog::ItemInfo;
 use crate::domain::match_data::MatchPlayer;
 use crate::test_support::{
@@ -64,12 +64,14 @@ fn player(hero_id: u32, patch_id: Option<u32>) -> MatchPlayer {
         hero_id,
         won: Some(true),
         patch_id,
-        purchase_log: None,
-        final_items: Some(vec![
-            "item_satanic".into(),
-            "item_black_king_bar".into(),
-            "item_desolator".into(),
-        ]),
+        build: Some(PlayerBuild {
+            inventory: vec![
+                "item_satanic".into(),
+                "item_black_king_bar".into(),
+                "item_desolator".into(),
+            ],
+            ..PlayerBuild::default()
+        }),
         ability_upgrades: None,
     }
 }
@@ -137,7 +139,7 @@ fn sample_provider() -> Arc<FakeStatsProvider> {
             vec![
                 player(22, Some(PATCH)),
                 MatchPlayer {
-                    final_items: None,
+                    build: None,
                     ..player(49, Some(PATCH))
                 },
             ],
@@ -318,20 +320,23 @@ async fn empty_listing_restarts_from_the_newest_matches() {
 #[test]
 fn analyzed_player_gets_an_ordered_build_and_the_rest_an_unordered_one() {
     let analyzed = MatchPlayer {
-        purchase_log: Some(vec![
-            Purchase {
-                item: "item_desolator".into(),
-                time: 700,
-            },
-            Purchase {
-                item: "item_black_king_bar".into(),
-                time: 900,
-            },
-            Purchase {
-                item: "item_satanic".into(),
-                time: 1500,
-            },
-        ]),
+        build: Some(PlayerBuild {
+            purchases: Some(vec![
+                Purchase {
+                    item: "item_desolator".into(),
+                    time: 700,
+                },
+                Purchase {
+                    item: "item_black_king_bar".into(),
+                    time: 900,
+                },
+                Purchase {
+                    item: "item_satanic".into(),
+                    time: 1500,
+                },
+            ]),
+            ..PlayerBuild::default()
+        }),
         ..player(22, Some(PATCH))
     };
     let match_details = details(1, vec![analyzed, player(49, Some(PATCH))]);
@@ -365,7 +370,10 @@ fn players_without_patch_result_or_items_are_left_out() {
                 ..player(2, Some(PATCH))
             },
             MatchPlayer {
-                final_items: Some(vec!["item_satanic".into()]),
+                build: Some(PlayerBuild {
+                    inventory: vec!["item_satanic".into()],
+                    ..PlayerBuild::default()
+                }),
                 ..player(3, Some(PATCH))
             },
         ],

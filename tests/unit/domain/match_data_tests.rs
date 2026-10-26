@@ -1,14 +1,17 @@
 //! Testes unitários de `src/domain/match_data.rs`.
 
 use super::*;
+use crate::domain::builds::PlayerBuild;
 
 fn player(patch_id: Option<u32>) -> MatchPlayer {
     MatchPlayer {
         hero_id: 22,
         won: Some(true),
         patch_id,
-        purchase_log: None,
-        final_items: Some(vec!["item_satanic".into()]),
+        build: Some(PlayerBuild {
+            inventory: vec!["item_satanic".into()],
+            ..PlayerBuild::default()
+        }),
         ability_upgrades: None,
     }
 }
@@ -41,7 +44,7 @@ fn player_patch_comes_first_then_the_match_patch() {
 }
 
 #[test]
-fn build_input_needs_result_and_final_items() {
+fn build_input_needs_result_and_inventory() {
     assert!(player(None).build_input().is_some());
     let without_result = MatchPlayer {
         won: None,
@@ -49,7 +52,7 @@ fn build_input_needs_result_and_final_items() {
     };
     assert_eq!(without_result.build_input(), None);
     let without_items = MatchPlayer {
-        final_items: None,
+        build: None,
         ..player(None)
     };
     assert_eq!(without_items.build_input(), None);
