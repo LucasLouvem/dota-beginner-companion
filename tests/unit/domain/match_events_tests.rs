@@ -281,6 +281,7 @@ fn recipes() -> Arc<ItemCatalog> {
         name: name.into(),
         display_name: name.into(),
         cost: None,
+        image_path: None,
         components: components
             .iter()
             .map(|component| (*component).into())

@@ -9,6 +9,7 @@ fn catalog() -> ItemCatalog {
             name: "item_satanic".into(),
             display_name: "Satanic".into(),
             cost: None,
+            image_path: None,
             components: vec![
                 "item_reaver".into(),
                 "item_claymore".into(),
@@ -20,6 +21,7 @@ fn catalog() -> ItemCatalog {
             name: "item_tango".into(),
             display_name: "Tango".into(),
             cost: None,
+            image_path: None,
             components: vec![],
         },
     ])
@@ -71,6 +73,7 @@ fn priced(name: &str, cost: Option<u32>) -> ItemInfo {
         name: name.into(),
         display_name: name.into(),
         cost,
+        image_path: None,
         components: vec![],
     }
 }

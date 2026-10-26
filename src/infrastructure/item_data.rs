@@ -35,6 +35,7 @@ struct ItemRecord {
     display_name: String,
     cost: Option<u32>,
     components: Vec<String>,
+    img: Option<String>,
 }
 
 /// Catálogo com os dados embutidos.
@@ -53,6 +54,7 @@ fn parse_catalog(contents: &str) -> Result<ItemCatalog, ItemDataError> {
                 display_name: record.display_name,
                 cost: record.cost,
                 components: record.components,
+                image_path: record.img,
             })
             .collect(),
     ))

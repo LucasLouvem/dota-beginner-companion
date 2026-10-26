@@ -126,6 +126,7 @@ fn catalog() -> ItemCatalog {
         name: name.into(),
         display_name: name.into(),
         cost: None,
+        image_path: None,
         components: names(components),
     };
     ItemCatalog::new(vec![

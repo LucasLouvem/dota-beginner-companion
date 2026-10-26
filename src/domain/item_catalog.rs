@@ -12,6 +12,10 @@ pub struct ItemInfo {
     pub display_name: String,
     /// Custo em ouro; ausente em alguns itens da fonte (como os neutros).
     pub cost: Option<u32>,
+    /// Caminho da imagem do item como a fonte informa
+    /// (`/apps/dota2/images/dota_react/items/blink.png?t=…`); `None` quando
+    /// a fonte não traz.
+    pub image_path: Option<String>,
     /// Itens que formam a receita, pelo nome interno; vazio quando o item não
     /// é montado a partir de outros.
     pub components: Vec<String>,

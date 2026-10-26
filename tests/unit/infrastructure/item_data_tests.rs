@@ -81,3 +81,19 @@ fn embedded_catalog_finds_items_by_the_source_id() {
     );
     assert_eq!(catalog.by_id(0), None);
 }
+
+#[test]
+fn embedded_items_keep_the_image_path_of_the_source() {
+    let catalog = embedded_catalog().unwrap();
+    let blink = catalog.by_name("item_blink").unwrap();
+    assert_eq!(
+        blink.image_path.as_deref(),
+        Some("/apps/dota2/images/dota_react/items/blink.png?t=1593393829403")
+    );
+    assert!(
+        (0..2000)
+            .filter_map(|id| catalog.by_id(id))
+            .all(|item| item.image_path.is_some()),
+        "todo item do recorte tem imagem"
+    );
+}

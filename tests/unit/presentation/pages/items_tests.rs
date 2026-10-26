@@ -26,6 +26,7 @@ fn items() -> ItemCatalog {
         name: name.into(),
         display_name: display_name.into(),
         cost: Some(4000),
+        image_path: None,
         components: vec![],
     };
     ItemCatalog::new(vec![

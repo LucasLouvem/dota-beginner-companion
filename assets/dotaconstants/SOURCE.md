@@ -26,12 +26,13 @@ Para atualizar, gere o recorte a partir de um commit novo com o mesmo filtro e r
   - `display_name`: o `dname`;
   - `cost`: o custo em ouro, ou `null` quando a origem não o informa (alguns itens, como os tokens de neutros);
   - `components`: os componentes da receita, com o mesmo prefixo. Na origem, algumas receitas têm um componente vazio (`""`), que fica de fora.
+  - `img`: o caminho da imagem do item no CDN da Steam, como na origem (ex.: `/apps/dota2/images/dota_react/items/blink.png?t=1593393829403`). O aplicativo baixa a imagem em tempo de execução para o cache do usuário; as imagens não são versionadas.
 - Um item por linha, na ordem do `id` da origem.
 
 Comando usado para gerar o recorte a partir do arquivo de origem:
 
 ```sh
-jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, cost: .value.cost, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .]}] | sort_by(.id) | .[]' items.json \
+jq -c '[to_entries[] | select(.value.dname != null) | {id: .value.id, name: ("item_" + .key), display_name: .value.dname, cost: .value.cost, components: [(.value.components // [])[] | select(. != null and . != "") | "item_" + .], img: .value.img}] | sort_by(.id) | .[]' items.json \
   | awk 'BEGIN{print "["} NR>1{print prev","} {prev=$0} END{print prev; print "]"}' > assets/dotaconstants/items.json
 ```
 
