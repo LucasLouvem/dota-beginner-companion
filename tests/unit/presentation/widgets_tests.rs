@@ -94,3 +94,10 @@ fn shorter_list_truncates_and_updates_the_changed_row() {
         vec![RowChange::Update(0), RowChange::Truncate(1)]
     );
 }
+
+#[test]
+fn duration_uses_hours_only_when_needed() {
+    assert_eq!(format_duration(0), "0:00");
+    assert_eq!(format_duration(1429), "23:49");
+    assert_eq!(format_duration(3723), "1:02:03");
+}

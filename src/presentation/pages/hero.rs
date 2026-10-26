@@ -24,7 +24,8 @@ use crate::domain::match_events::{
 };
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{
-    Level, RowContent, RowSection, boxed_list, format_time, section_title, status_row,
+    Level, RowContent, RowSection, boxed_list, format_duration, format_time, section_title,
+    status_row,
 };
 
 use super::send_command;
@@ -725,16 +726,6 @@ pub fn result_lines(summary: &MatchSummary) -> Vec<String> {
         lines.push(translate_with("ID da partida: {}", &[match_id.as_str()]));
     }
     lines
-}
-
-/// Duração no formato do relógio do Dota: `23:49` ou `1:02:03`.
-pub fn format_duration(total_secs: u32) -> String {
-    let (hours, minutes, seconds) = (total_secs / 3600, total_secs / 60 % 60, total_secs % 60);
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
 }
 
 /// Estatísticas do jogador; cada linha só aparece com todos os seus números.

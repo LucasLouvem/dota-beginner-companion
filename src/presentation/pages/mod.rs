@@ -2,6 +2,7 @@
 
 pub mod diagnostics;
 pub mod hero;
+pub mod items;
 
 use relm4::adw;
 use tokio::sync::mpsc::UnboundedSender;
@@ -37,7 +38,6 @@ pub fn planned_page(title: &str) -> adw::StatusPage {
 pub fn tabs() -> Vec<(&'static str, String, adw::StatusPage)> {
     [
         ("abilities", "Habilidades"),
-        ("items", "Itens"),
         ("pro", "Dados profissionais"),
         ("history", "Histórico"),
         ("settings", "Configurações"),

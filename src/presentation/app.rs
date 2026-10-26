@@ -19,6 +19,7 @@ use super::pages::{
     self,
     diagnostics::{DiagnosticsMessage, DiagnosticsPage},
     hero::{HeroMessage, HeroPage, HeroPageInit},
+    items::{ItemsMessage, ItemsPage, ItemsPageInit},
 };
 
 /// Canais de comunicação entre a janela e o núcleo, e os dados embutidos.
@@ -96,6 +97,7 @@ pub async fn forward_snapshots(
 /// Componente raiz da janela principal.
 pub struct App {
     hero: Controller<HeroPage>,
+    items: Controller<ItemsPage>,
     diagnostics: Controller<DiagnosticsPage>,
     /// Leitura do estado mais recente quando chega `CoreUpdate::Changed`.
     state: watch::Receiver<AppSnapshot>,
@@ -130,6 +132,12 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        let items = ItemsPage::builder()
+            .launch(ItemsPageInit {
+                heroes: Arc::clone(&core.heroes),
+                items: Arc::clone(&core.items),
+            })
+            .detach();
         let hero = HeroPage::builder()
             .launch(HeroPageInit {
                 commands: core.commands.clone(),
@@ -146,6 +154,10 @@ impl Component for App {
         stack.add_titled(hero.widget(), Some("hero"), &translate("Herói"));
         for (name, title, page) in pages::tabs() {
             stack.add_titled(&page, Some(name), &title);
+            // A aba Itens fica logo depois de Habilidades.
+            if name == "abilities" {
+                stack.add_titled(items.widget(), Some("items"), &translate("Itens"));
+            }
         }
         stack.add_titled(
             diagnostics.widget(),
@@ -191,6 +203,7 @@ impl Component for App {
         ComponentParts {
             model: App {
                 hero,
+                items,
                 diagnostics,
                 state: window_state,
                 pending,
@@ -215,6 +228,8 @@ impl Component for App {
                 widgets.connection.set_label(&connection_label(&snapshot));
                 self.hero
                     .emit(HeroMessage::Snapshot(Box::new((*snapshot).clone())));
+                self.items
+                    .emit(ItemsMessage::Snapshot(Box::new((*snapshot).clone())));
                 self.diagnostics
                     .emit(DiagnosticsMessage::Snapshot(snapshot));
             }

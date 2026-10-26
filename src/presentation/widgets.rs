@@ -206,6 +206,16 @@ pub fn boxed_list() -> gtk::ListBox {
     list
 }
 
+/// Duração no formato do relógio do Dota: `23:49` ou `1:02:03`.
+pub fn format_duration(total_secs: u32) -> String {
+    let (hours, minutes, seconds) = (total_secs / 3600, total_secs / 60 % 60, total_secs % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
 /// "14:03:22 (há 5 s)" no fuso local.
 pub fn format_time(at: SystemTime) -> String {
     let secs = at

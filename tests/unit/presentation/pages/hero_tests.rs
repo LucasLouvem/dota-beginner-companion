@@ -387,13 +387,6 @@ fn result_lines_skip_missing_duration_and_match_id() {
 }
 
 #[test]
-fn duration_uses_hours_only_when_needed() {
-    assert_eq!(format_duration(0), "0:00");
-    assert_eq!(format_duration(1429), "23:49");
-    assert_eq!(format_duration(3723), "1:02:03");
-}
-
-#[test]
 fn stat_lines_show_kda_farm_and_rates() {
     assert_eq!(
         stat_lines(&summary().stats, Some(17)),

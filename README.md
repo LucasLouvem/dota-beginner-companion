@@ -17,6 +17,16 @@ A aba **Herói** acompanha a partida pelo GSI:
 - indica a origem de cada informação: dado embutido, confirmado pelo GSI, inferido pelo aplicativo ou marcado por você;
 - tem o botão **Partida encontrada**, para marcar esse momento manualmente, já que o GSI não o informa.
 
+A aba **Itens** mostra recomendações para o herói e o modo da partida, com dados do [OpenDota](https://www.opendota.com/) do patch atual:
+
+- até 3 builds de partidas profissionais de liga e até 5 de partidas públicas do modo, da maior para a menor taxa de vitória observada, sempre com o número de partidas; em Turbo, avisa que partidas profissionais não são turbo, e Contra bots usa os dados de Escolha Livre;
+- uma build são os três primeiros itens grandes (com receita e custo de pelo menos 2000): em ordem de compra quando a partida foi analisada, ou os itens finais, sem ordem;
+- builds com menos de 10 partidas não aparecem, e a aba diz "amostra insuficiente";
+- os itens mais comprados por fase do jogo em partidas profissionais, como popularidade, não taxa de vitória;
+- informa a fonte, o patch e se os dados são antigos (guardados de uma consulta anterior), e que a recomendação não considera posição (1 a 5).
+
+As partidas públicas são coletadas em segundo plano enquanto o aplicativo está aberto. O aplicativo limita as próprias chamadas ao OpenDota (por padrão, 1.000 por dia, com até 700 para a coleta) e guarda as respostas no banco local.
+
 A tela **Diagnóstico** mostra se tudo está pronto para o GSI funcionar:
 
 - localiza as bibliotecas Steam (padrão, Flatpak, `libraryfolders.vdf` e bibliotecas extras) e a instalação do Dota 2;
