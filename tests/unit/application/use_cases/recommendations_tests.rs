@@ -5,7 +5,6 @@ use crate::application::ports::PublicBuildStore;
 use crate::application::state::ModeOrigin;
 use crate::application::use_cases::fallback::DataOrigin;
 use crate::domain::game::GameSnapshot;
-use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::PopularityPhase;
 use crate::domain::match_events::{MatchResult, MatchSummary};
 use crate::test_support::{
@@ -125,7 +124,6 @@ fn sources(provider: FakeStatsProvider, store: MemoryPublicBuildStore) -> Extern
         budget: Arc::new(UnlimitedBudget),
         cache: Arc::new(MemoryCache::default()),
         store: Arc::new(store),
-        items: Arc::new(ItemCatalog::default()),
         embedded_patches: None,
     }
 }
@@ -200,6 +198,6 @@ async fn popularity_and_professional_results_come_with_their_sources() {
     // Sem resposta para a lista de partidas: a parte profissional vem vazia,
     // com a causa.
     assert!(recommendations.pro.error.is_some());
-    assert!(recommendations.pro.ranking.builds.is_empty());
+    assert!(recommendations.pro.wins.is_empty());
     assert_eq!(recommendations.patch, patch());
 }

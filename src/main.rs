@@ -208,7 +208,6 @@ fn external_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<Externa
         budget: Arc::new(budget) as Arc<dyn CallBudget>,
         store: Arc::new(store) as Arc<dyn PublicBuildStore>,
         cache: Arc::new(cache) as Arc<dyn CacheStore>,
-        items: Arc::clone(items),
         embedded_patches,
     })
 }

@@ -3,10 +3,9 @@
 
 use super::*;
 use crate::application::use_cases::recommendation_request::RecommendationKey;
-use crate::domain::builds::BuildKey;
 use crate::domain::hero_catalog::{AttackType, HeroInfo, PrimaryAttribute};
 use crate::domain::item_catalog::ItemInfo;
-use crate::test_support::{pro_builds as pro, public_win, recommendations, zeus_build};
+use crate::test_support::{pro_builds as pro, pro_win, public_win, recommendations, zeus_build};
 use std::sync::Arc;
 
 fn heroes() -> HeroCatalog {
@@ -50,20 +49,8 @@ fn key(mode: GameMode) -> RecommendationKey {
     }
 }
 
-fn ordered_build(wins: usize, matches: usize) -> RankedBuild {
-    RankedBuild {
-        key: BuildKey {
-            evidence: BuildEvidence::OrderedPurchaseLog,
-            items: vec![
-                "item_black_king_bar".into(),
-                "item_desolator".into(),
-                "item_satanic".into(),
-            ],
-        },
-        matches,
-        wins,
-        average_times: Some(vec![900, 1300, 1800]),
-    }
+fn one_pro_win() -> Vec<ProWin> {
+    vec![pro_win(1, zeus_build(), None)]
 }
 
 fn content(status: &RecommendationStatus) -> ItemsContent {
@@ -102,21 +89,25 @@ fn without_sources_or_hero_the_header_says_why() {
 fn turbo_warns_that_professional_matches_are_not_turbo() {
     let ready = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::Turbo,
-        pro(vec![ordered_build(9, 12)], 30, Some(DataOrigin::Live)),
+        pro(one_pro_win(), 30, Some(DataOrigin::Live)),
         vec![],
     ))));
 
     assert_eq!(ready.header[0].title, "Zeus · Turbo · patch 7.41");
     assert_eq!(ready.pro[0].title, "Partidas profissionais não são turbo");
     assert_eq!(ready.pro[0].level, Level::Warning);
-    assert_eq!(ready.pro[1].title, "Black King Bar → Desolator → Satanic");
+    assert_eq!(ready.pro[1].title, "Vitória profissional: Liga Teste");
+    assert_eq!(
+        ready.pro[2].title,
+        "Inventário final: Blink Dagger, Black King Bar"
+    );
 }
 
 #[test]
 fn all_pick_has_no_turbo_warning_and_bots_says_its_data_is_all_pick() {
     let all_pick = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::AllPick,
-        pro(vec![ordered_build(9, 12)], 30, Some(DataOrigin::Live)),
+        pro(one_pro_win(), 30, Some(DataOrigin::Live)),
         vec![],
     ))));
     let bots = content(&RecommendationStatus::Ready(Arc::new(recommendations(
@@ -125,14 +116,11 @@ fn all_pick_has_no_turbo_warning_and_bots_says_its_data_is_all_pick() {
         vec![],
     ))));
 
-    assert_eq!(
-        all_pick.pro[0].title,
-        "Black King Bar → Desolator → Satanic"
-    );
+    assert_eq!(all_pick.pro[0].title, "Vitória profissional: Liga Teste");
     assert_eq!(all_pick.notes.len(), 1);
     assert_eq!(
         all_pick.notes[0].title,
-        "Dados públicos de todas as faixas de rank; a recomendação não considera posição."
+        "As vitórias públicas são de todas as faixas de rank e de qualquer posição."
     );
     assert_eq!(
         bots.notes[1].title,
@@ -141,7 +129,7 @@ fn all_pick_has_no_turbo_warning_and_bots_says_its_data_is_all_pick() {
 }
 
 #[test]
-fn sample_below_minimum_is_shown_with_the_analyzed_count() {
+fn without_wins_each_block_says_none_was_found() {
     let ready = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::AllPick,
         pro(vec![], 30, Some(DataOrigin::Live)),
@@ -152,8 +140,8 @@ fn sample_below_minimum_is_shown_with_the_analyzed_count() {
         ready.pro[0],
         RowContent::new(
             Level::Info,
-            "Amostra insuficiente",
-            "Nenhuma build com pelo menos 10 partidas entre 30 partidas profissionais válidas."
+            "Nenhuma vitória recente encontrada",
+            "Entre as 30 partidas de liga recentes examinadas; derrotas, outros patches e partidas sem build ficam de fora."
         )
     );
     assert_eq!(ready.public[0].title, "Nenhuma vitória recente encontrada");
@@ -163,7 +151,7 @@ fn sample_below_minimum_is_shown_with_the_analyzed_count() {
 fn stale_professional_data_is_marked_as_old() {
     let ready = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::AllPick,
-        pro(vec![ordered_build(9, 12)], 30, Some(DataOrigin::Stale)),
+        pro(one_pro_win(), 30, Some(DataOrigin::Stale)),
         vec![],
     ))));
 
@@ -265,18 +253,6 @@ fn rank_label_reads_medal_and_stars() {
 }
 
 #[test]
-fn ordered_build_row_shows_rate_sample_and_average_times() {
-    assert_eq!(
-        build_row(&ordered_build(9, 12), &items()),
-        RowContent::new(
-            Level::Info,
-            "Black King Bar → Desolator → Satanic",
-            "Taxa de vitória observada: 75% em 12 partidas · tempo médio: 15:00, 21:40, 30:00"
-        )
-    );
-}
-
-#[test]
 fn popularity_lists_the_most_bought_items_by_phase_with_the_source() {
     let ready = content(&RecommendationStatus::Ready(Arc::new(recommendations(
         GameMode::AllPick,
@@ -286,14 +262,6 @@ fn popularity_lists_the_most_bought_items_by_phase_with_the_source() {
 
     assert_eq!(ready.popularity[0].title, "Início: Iron Branch, Satanic");
     assert_eq!(ready.popularity[1].level, Level::Warning, "dados antigos");
-}
-
-#[test]
-fn win_percent_rounds_without_floating_point() {
-    assert_eq!(win_percent(2, 3), 67);
-    assert_eq!(win_percent(1, 2), 50);
-    assert_eq!(win_percent(1, 3), 33);
-    assert_eq!(win_percent(0, 0), 0);
 }
 
 #[test]

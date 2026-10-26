@@ -4,7 +4,6 @@
 use super::*;
 use crate::application::ports::{BudgetError, BudgetExhausted, BudgetLimit, CallBudget};
 use crate::domain::builds::{PlayerBuild, Purchase};
-use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::MatchPlayer;
 use crate::test_support::{
     FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
@@ -98,7 +97,6 @@ fn sources(
         budget,
         store,
         cache: Arc::new(MemoryCache::default()),
-        items: Arc::new(ItemCatalog::default()),
         embedded_patches: None,
     }
 }

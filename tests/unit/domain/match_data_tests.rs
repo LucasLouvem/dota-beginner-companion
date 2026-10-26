@@ -44,21 +44,6 @@ fn player_patch_comes_first_then_the_match_patch() {
 }
 
 #[test]
-fn build_input_needs_result_and_inventory() {
-    assert!(player(None).build_input().is_some());
-    let without_result = MatchPlayer {
-        won: None,
-        ..player(None)
-    };
-    assert_eq!(without_result.build_input(), None);
-    let without_items = MatchPlayer {
-        build: None,
-        ..player(None)
-    };
-    assert_eq!(without_items.build_input(), None);
-}
-
-#[test]
 fn finds_the_player_with_the_hero() {
     assert_eq!(
         details(None, None)

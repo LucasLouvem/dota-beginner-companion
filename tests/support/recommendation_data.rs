@@ -5,35 +5,43 @@ use std::time::UNIX_EPOCH;
 
 use crate::application::ports::PublicWin;
 use crate::application::use_cases::fallback::{DataOrigin, Sourced};
-use crate::application::use_cases::pro_builds::ProBuilds;
+use crate::application::use_cases::pro_builds::{ProBuilds, ProWin};
 use crate::application::use_cases::recommendation_request::RecommendationKey;
 use crate::application::use_cases::recommendations::Recommendations;
-use crate::domain::builds::{BuildRanking, PlayerBuild, Purchase, RankedBuild};
+use crate::domain::builds::{PlayerBuild, Purchase};
 use crate::domain::game::GameMode;
-use crate::domain::match_data::{ItemPopularity, PopularityPhase};
+use crate::domain::match_data::{HeroMatch, ItemPopularity, PopularityPhase};
 use crate::domain::patch::Patch;
 
-/// Resultado profissional com as builds, `valid_matches` partidas válidas e a
-/// origem da lista de candidatas.
-pub fn pro_builds(
-    builds: Vec<RankedBuild>,
-    valid_matches: usize,
-    origin: Option<DataOrigin>,
-) -> ProBuilds {
+/// Resultado profissional com as vitórias, `examined` partidas examinadas e
+/// a origem da lista de candidatas.
+pub fn pro_builds(wins: Vec<ProWin>, examined: usize, origin: Option<DataOrigin>) -> ProBuilds {
     ProBuilds {
-        ranking: BuildRanking {
-            builds,
-            analyzed: valid_matches,
-        },
-        ability_order: None,
+        wins,
         recent_matches: vec![],
-        examined: valid_matches,
-        valid_matches,
+        examined,
         discarded: BTreeMap::new(),
         stopped_by: None,
         candidates_origin: origin,
         error: None,
         calls: 0,
+    }
+}
+
+/// Vitória profissional do Zeus numa liga, com a build e a ordem de
+/// habilidades dadas.
+pub fn pro_win(match_id: u64, build: PlayerBuild, ability_upgrades: Option<Vec<u32>>) -> ProWin {
+    ProWin {
+        hero_match: HeroMatch {
+            match_id,
+            start_time: None,
+            league_id: Some(18631),
+            league_name: Some("Liga Teste".into()),
+            hero_won: Some(true),
+            duration_secs: Some(2400),
+        },
+        build,
+        ability_upgrades,
     }
 }
 

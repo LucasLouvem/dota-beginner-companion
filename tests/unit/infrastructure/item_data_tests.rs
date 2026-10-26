@@ -69,14 +69,6 @@ fn embedded_catalog_has_the_cost_of_the_source() {
 }
 
 #[test]
-fn embedded_black_king_bar_is_a_major_item_and_its_components_are_not() {
-    let catalog = embedded_catalog().unwrap();
-    assert!(catalog.is_major_item("item_black_king_bar"));
-    assert!(!catalog.is_major_item("item_ogre_axe"));
-    assert!(!catalog.is_major_item("item_mithril_hammer"));
-}
-
-#[test]
 fn embedded_catalog_finds_items_by_the_source_id() {
     let catalog = embedded_catalog().unwrap();
     assert_eq!(

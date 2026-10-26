@@ -40,13 +40,13 @@ impl RecommendationTab {
     fn intro(self) -> String {
         match self {
             RecommendationTab::Items => translate(
-                "Builds observadas em partidas para o herói e o modo da partida, com dados do \\
-                 OpenDota. São sugestões estatísticas: cada build mostra a taxa de vitória \\
-                 observada e quantas partidas foram analisadas.",
+                "Builds reais das vitórias mais recentes do herói no modo da partida, como cada \\
+                 jogador fez: inventário final, mochila, item neutro e ordem de compra, com \\
+                 dados do OpenDota.",
             ),
             RecommendationTab::Abilities => translate(
-                "Ordem em que as habilidades costumam ser evoluídas nos primeiros níveis, em \\
-                 partidas profissionais do herói, com dados do OpenDota.",
+                "Ordem em que as habilidades foram evoluídas em cada vitória profissional recente \\
+                 do herói, com dados do OpenDota.",
             ),
             RecommendationTab::ProMatches => {
                 translate("Partidas profissionais recentes com o herói, com dados do OpenDota.")
@@ -60,14 +60,14 @@ impl RecommendationTab {
             RecommendationTab::Items => vec![
                 None,
                 None,
-                Some(translate("Builds de partidas profissionais")),
-                Some(translate("Builds de partidas públicas")),
+                Some(translate("Vitórias profissionais recentes")),
+                Some(translate("Vitórias públicas recentes")),
                 Some(translate("Itens mais comprados por fase (profissionais)")),
             ],
             RecommendationTab::Abilities => vec![
                 None,
                 None,
-                Some(translate("Ordem de habilidades mais comum (profissionais)")),
+                Some(translate("Ordem de habilidades das vitórias profissionais")),
             ],
             RecommendationTab::ProMatches => {
                 vec![None, Some(translate("Partidas profissionais recentes"))]

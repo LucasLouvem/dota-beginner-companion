@@ -1,18 +1,14 @@
-//! Builds e ordem de habilidades de partidas profissionais recentes de um
-//! herói, no patch atual. A lista de candidatas não é documentada como
-//! profissional: só contam partidas de liga (`leagueid` diferente de zero),
-//! conferido também nos detalhes.
+//! Vitórias profissionais recentes de um herói no patch atual, com a build
+//! real e a ordem de habilidades de cada uma. A lista de candidatas não é
+//! documentada como profissional: só contam partidas de liga (`leagueid`
+//! diferente de zero), conferido também nos detalhes.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::application::ports::{CallCategory, ProviderError, StatsProvider, StatsQuery};
-use crate::domain::builds::{
-    AbilityOrder, BuildRanking, MIN_SAMPLE, MatchBuild, ability_order, build_from_match,
-    rank_builds,
-};
-use crate::domain::item_catalog::ItemCatalog;
+use crate::domain::builds::PlayerBuild;
 use crate::domain::match_data::{HeroMatch, MatchDetails};
 
 use super::call_budget::QueryBudget;
@@ -23,16 +19,16 @@ use super::fallback::{DataOrigin, Sourced, load_with_fallback};
 pub const HERO_MATCHES_TTL: Duration = Duration::from_secs(3600);
 /// Detalhes de uma partida não mudam depois que ela termina.
 pub const MATCH_DETAILS_TTL: Duration = Duration::from_secs(365 * 24 * 3600);
-/// Builds profissionais mostradas.
-pub const PRO_BUILDS_SHOWN: usize = 3;
+/// Vitórias profissionais mostradas.
+pub const PRO_WINS_SHOWN: usize = 3;
 
 /// Limites de uma consulta (política do aplicativo).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProBuildLimits {
     /// Candidatas examinadas, da mais recente para a mais antiga.
     pub candidates: usize,
-    /// Partidas válidas usadas na agregação.
-    pub valid: usize,
+    /// Vitórias válidas procuradas.
+    pub wins: usize,
     /// Chamadas da consulta, contando a lista, os detalhes, novas tentativas
     /// e respostas 429. O cache não conta.
     pub calls: u32,
@@ -42,24 +38,24 @@ impl Default for ProBuildLimits {
     fn default() -> Self {
         Self {
             candidates: 60,
-            valid: 30,
+            wins: PRO_WINS_SHOWN,
             calls: 40,
         }
     }
 }
 
-/// Por que uma candidata não entrou na agregação.
+/// Por que uma candidata não entrou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiscardReason {
     /// Sem `leagueid` (ou zero) na lista ou nos detalhes.
     NotProfessional,
+    /// O time do herói perdeu (ou o resultado não é conhecido).
+    NotWon,
     /// Patch diferente do atual.
     OtherPatch,
     /// Nem o jogador nem a partida informam o patch.
     UnknownPatch,
-    /// A partida não foi analisada (sem registro de compras).
-    NotParsed,
-    /// O jogador com o herói falta, ou não tem resultado, compras ou habilidades.
+    /// O jogador com o herói falta ou não tem inventário.
     MissingPlayerData,
     /// A busca dos detalhes falhou (rede, resposta inválida).
     FetchFailed,
@@ -68,21 +64,31 @@ pub enum DiscardReason {
 /// O que encerrou a consulta antes de examinar todas as candidatas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProBuildsStop {
-    ValidLimit,
+    WinLimit,
     CandidateLimit,
     /// Orçamento da consulta ou do aplicativo esgotado.
     Budget,
 }
 
+/// Uma vitória profissional do herói, como o jogador jogou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProWin {
+    /// A partida na lista de candidatas (liga, data e duração).
+    pub hero_match: HeroMatch,
+    pub build: PlayerBuild,
+    /// IDs das habilidades na ordem em que foram evoluídas; ausente em
+    /// partida não analisada.
+    pub ability_upgrades: Option<Vec<u32>>,
+}
+
 /// Resultado da consulta.
 #[derive(Debug, Clone)]
 pub struct ProBuilds {
-    pub ranking: BuildRanking,
-    pub ability_order: Option<AbilityOrder>,
+    /// Vitórias válidas, da mais recente para a mais antiga.
+    pub wins: Vec<ProWin>,
     /// Partidas recentes do herói, para a aba de dados profissionais.
     pub recent_matches: Vec<HeroMatch>,
     pub examined: usize,
-    pub valid_matches: usize,
     pub discarded: BTreeMap<DiscardReason, usize>,
     pub stopped_by: Option<ProBuildsStop>,
     /// Origem da lista de candidatas.
@@ -92,7 +98,8 @@ pub struct ProBuilds {
     pub calls: u32,
 }
 
-/// Consulta as builds profissionais de `hero_id` no patch `patch_id`.
+/// Procura as vitórias profissionais mais recentes de `hero_id` no patch
+/// `patch_id`.
 pub async fn load_pro_builds(
     sources: &ExternalSources,
     hero_id: u32,
@@ -111,11 +118,9 @@ pub async fn load_pro_builds(
     )
     .await;
     let mut result = ProBuilds {
-        ranking: BuildRanking::default(),
-        ability_order: None,
+        wins: Vec::new(),
         recent_matches: candidates.value.clone().unwrap_or_default(),
         examined: 0,
-        valid_matches: 0,
         discarded: BTreeMap::new(),
         stopped_by: None,
         candidates_origin: candidates.origin,
@@ -128,11 +133,9 @@ pub async fn load_pro_builds(
     let mut ordered = result.recent_matches.clone();
     ordered.sort_by_key(|candidate| std::cmp::Reverse(candidate.start_time));
 
-    let mut builds = Vec::new();
-    let mut upgrades = Vec::new();
     for candidate in ordered {
-        if result.valid_matches >= limits.valid {
-            result.stopped_by = Some(ProBuildsStop::ValidLimit);
+        if result.wins.len() >= limits.wins {
+            result.stopped_by = Some(ProBuildsStop::WinLimit);
             break;
         }
         if result.examined >= limits.candidates {
@@ -142,6 +145,11 @@ pub async fn load_pro_builds(
         result.examined += 1;
         if !candidate.is_league_match() {
             discard(&mut result, DiscardReason::NotProfessional);
+            continue;
+        }
+        // Derrota já conhecida pela lista não gasta a busca dos detalhes.
+        if candidate.hero_won == Some(false) {
+            discard(&mut result, DiscardReason::NotWon);
             continue;
         }
         let details = fetch(
@@ -165,43 +173,38 @@ pub async fn load_pro_builds(
             discard(&mut result, DiscardReason::FetchFailed);
             continue;
         };
-        match validate(&details, hero_id, patch_id, &sources.items) {
-            Ok((build, ability_upgrades)) => {
-                result.valid_matches += 1;
-                builds.extend(build);
-                upgrades.push(ability_upgrades);
-            }
+        match validate(&details, &candidate, hero_id, patch_id) {
+            Ok((build, ability_upgrades)) => result.wins.push(ProWin {
+                hero_match: candidate,
+                build,
+                ability_upgrades,
+            }),
             Err(reason) => discard(&mut result, reason),
         }
     }
 
     result.calls = budget.used();
-    result.ranking = rank_builds(builds, MIN_SAMPLE, PRO_BUILDS_SHOWN);
-    result.ability_order = ability_order(&upgrades, MIN_SAMPLE);
     tracing::debug!(
         hero_id,
         patch_id,
         examined = result.examined,
-        valid = result.valid_matches,
+        wins = result.wins.len(),
         calls = result.calls,
         discarded = ?result.discarded,
         stopped_by = ?result.stopped_by,
-        "professional builds query finished"
+        "professional wins query finished"
     );
     result
 }
 
-/// Build de uma partida e se o herói venceu.
-type MatchBuildEntry = (MatchBuild, bool);
-
-/// Confere uma partida e devolve a build (se houver três itens grandes) e a
-/// ordem de habilidades do jogador com o herói.
+/// Confere uma partida e devolve a build e a ordem de habilidades do
+/// jogador com o herói, quando é uma vitória de liga no patch.
 fn validate(
     details: &MatchDetails,
+    candidate: &HeroMatch,
     hero_id: u32,
     patch_id: u32,
-    items: &ItemCatalog,
-) -> Result<(Option<MatchBuildEntry>, Vec<u32>), DiscardReason> {
+) -> Result<(PlayerBuild, Option<Vec<u32>>), DiscardReason> {
     if !details.is_league_match() {
         return Err(DiscardReason::NotProfessional);
     }
@@ -213,23 +216,14 @@ fn validate(
         Some(patch) if patch != patch_id => return Err(DiscardReason::OtherPatch),
         Some(_) => {}
     }
-    if !details.parsed {
-        return Err(DiscardReason::NotParsed);
+    if player.won.or(candidate.hero_won) != Some(true) {
+        return Err(DiscardReason::NotWon);
     }
-    let input = player
-        .build_input()
-        .ok_or(DiscardReason::MissingPlayerData)?;
-    if input.purchase_log.is_none() {
-        return Err(DiscardReason::MissingPlayerData);
-    }
-    let upgrades = player
-        .ability_upgrades
+    let build = player
+        .build
         .clone()
         .ok_or(DiscardReason::MissingPlayerData)?;
-    Ok((
-        build_from_match(&input, items).map(|build| (build, input.won)),
-        upgrades,
-    ))
+    Ok((build, player.ability_upgrades.clone()))
 }
 
 fn discard(result: &mut ProBuilds, reason: DiscardReason) {

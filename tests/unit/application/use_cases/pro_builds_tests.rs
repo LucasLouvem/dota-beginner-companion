@@ -5,8 +5,7 @@ use super::*;
 use crate::application::ports::{
     BudgetError, BudgetExhausted, BudgetLimit, CacheStore, CallBudget,
 };
-use crate::domain::builds::{BuildEvidence, BuildKey, PlayerBuild, Purchase};
-use crate::domain::item_catalog::ItemInfo;
+use crate::domain::builds::{PlayerBuild, Purchase};
 use crate::domain::match_data::MatchPlayer;
 use crate::test_support::{
     FakeResponse, FakeStatsProvider, MemoryCache, MemoryPublicBuildStore, UnlimitedBudget,
@@ -21,22 +20,6 @@ fn at(seconds: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(seconds)
 }
 
-fn items() -> Arc<ItemCatalog> {
-    let major = |id: u32, name: &str| ItemInfo {
-        id,
-        name: name.into(),
-        display_name: name.into(),
-        cost: Some(4000),
-        components: vec!["item_component".into()],
-    };
-    Arc::new(ItemCatalog::new(vec![
-        major(1, "item_black_king_bar"),
-        major(2, "item_desolator"),
-        major(3, "item_satanic"),
-        major(4, "item_manta"),
-    ]))
-}
-
 fn candidate(match_id: u64, league_id: Option<u32>) -> HeroMatch {
     HeroMatch {
         match_id,
@@ -49,28 +32,29 @@ fn candidate(match_id: u64, league_id: Option<u32>) -> HeroMatch {
     }
 }
 
+fn zeus_build() -> PlayerBuild {
+    PlayerBuild {
+        inventory: vec!["item_blink".into(), "item_refresher".into()],
+        purchases: Some(vec![
+            Purchase {
+                item: "item_tango".into(),
+                time: -89,
+            },
+            Purchase {
+                item: "item_blink".into(),
+                time: 754,
+            },
+        ]),
+        ..PlayerBuild::default()
+    }
+}
+
 fn zeus(won: bool) -> MatchPlayer {
     MatchPlayer {
         hero_id: ZEUS,
         won: Some(won),
         patch_id: Some(PATCH),
-        build: Some(PlayerBuild {
-            purchases: Some(vec![
-                Purchase {
-                    item: "item_black_king_bar".into(),
-                    time: 900,
-                },
-                Purchase {
-                    item: "item_desolator".into(),
-                    time: 1300,
-                },
-                Purchase {
-                    item: "item_satanic".into(),
-                    time: 1800,
-                },
-            ]),
-            ..PlayerBuild::default()
-        }),
+        build: Some(zeus_build()),
         ability_upgrades: Some(vec![1, 2, 1, 3, 1, 4, 1, 2, 2, 2]),
     }
 }
@@ -120,7 +104,6 @@ impl Setup {
             budget,
             cache: self.cache.clone(),
             store: Arc::new(MemoryPublicBuildStore::default()),
-            items: items(),
             embedded_patches: None,
         };
         load_pro_builds(&sources, ZEUS, PATCH, at(10_000), limits).await
@@ -132,54 +115,100 @@ impl Setup {
     }
 }
 
-fn ordered_key() -> BuildKey {
-    BuildKey {
-        evidence: BuildEvidence::OrderedPurchaseLog,
-        items: vec![
-            "item_black_king_bar".into(),
-            "item_desolator".into(),
-            "item_satanic".into(),
-        ],
+fn match_ids(result: &ProBuilds) -> Vec<u64> {
+    result
+        .wins
+        .iter()
+        .map(|win| win.hero_match.match_id)
+        .collect()
+}
+
+fn lost(match_id: u64) -> HeroMatch {
+    HeroMatch {
+        hero_won: Some(false),
+        ..candidate(match_id, Some(100))
     }
 }
 
 #[tokio::test]
-async fn valid_league_matches_form_the_ranking_and_ability_order() {
-    let setup = Setup::new((1..=12).map(|id| candidate(id, Some(100))).collect());
-    for id in 1..=12 {
-        setup.details(details(id, zeus(id <= 9)));
-    }
-
-    let result = setup.run().await;
-
-    assert_eq!(result.valid_matches, 12);
-    assert_eq!(result.ranking.analyzed, 12);
-    assert_eq!(result.ranking.builds.len(), 1);
-    let build = &result.ranking.builds[0];
-    assert_eq!(build.key, ordered_key());
-    assert_eq!((build.matches, build.wins), (12, 9));
-    assert_eq!(build.average_times, Some(vec![900, 1300, 1800]));
-    assert_eq!(
-        result.ability_order.map(|order| order.ability_ids),
-        Some(vec![1, 2, 1, 3, 1, 4, 1, 2, 2, 2])
-    );
-    assert_eq!(result.calls, 13, "a lista e os 12 detalhes");
-    assert_eq!(result.stopped_by, None);
-    assert_eq!(result.recent_matches.len(), 12);
-}
-
-#[tokio::test]
-async fn fewer_than_ten_matches_of_a_build_give_insufficient_sample() {
-    let setup = Setup::new((1..=9).map(|id| candidate(id, Some(100))).collect());
-    for id in 1..=9 {
+async fn the_three_most_recent_wins_are_kept_with_build_and_abilities() {
+    let setup = Setup::new((1..=5).map(|id| candidate(id, Some(100))).collect());
+    for id in 1..=5 {
         setup.details(details(id, zeus(true)));
     }
 
     let result = setup.run().await;
 
-    assert_eq!(result.valid_matches, 9);
-    assert!(result.ranking.builds.is_empty());
-    assert_eq!(result.ability_order, None);
+    assert_eq!(match_ids(&result), [5, 4, 3]);
+    assert_eq!(result.wins[0].build, zeus_build());
+    assert_eq!(
+        result.wins[0].ability_upgrades,
+        Some(vec![1, 2, 1, 3, 1, 4, 1, 2, 2, 2])
+    );
+    assert_eq!(result.wins[0].hero_match, candidate(5, Some(100)));
+    assert_eq!(result.calls, 4, "a lista e os 3 detalhes");
+    assert_eq!(result.stopped_by, Some(ProBuildsStop::WinLimit));
+    assert_eq!(result.recent_matches.len(), 5);
+}
+
+#[tokio::test]
+async fn losses_in_the_list_are_skipped_without_fetching_details() {
+    let setup = Setup::new(vec![
+        lost(4),
+        lost(3),
+        candidate(2, Some(100)),
+        candidate(1, Some(100)),
+    ]);
+    for id in 1..=2 {
+        setup.details(details(id, zeus(true)));
+    }
+
+    let result = setup.run().await;
+
+    assert_eq!(match_ids(&result), [2, 1]);
+    assert_eq!(result.discarded.get(&DiscardReason::NotWon), Some(&2));
+    assert_eq!(setup.provider.fetches(), 3, "a lista e as 2 vitórias");
+    assert_eq!(result.stopped_by, None);
+}
+
+#[tokio::test]
+async fn loss_known_only_in_the_details_is_discarded() {
+    let setup = Setup::new(vec![HeroMatch {
+        hero_won: None,
+        ..candidate(1, Some(100))
+    }]);
+    setup.details(details(1, zeus(false)));
+
+    let result = setup.run().await;
+
+    assert!(result.wins.is_empty());
+    assert_eq!(result.discarded.get(&DiscardReason::NotWon), Some(&1));
+}
+
+#[tokio::test]
+async fn win_of_a_match_not_analyzed_keeps_only_the_inventory() {
+    let setup = Setup::new(vec![candidate(1, Some(100))]);
+    let inventory_only = PlayerBuild {
+        inventory: vec!["item_blink".into()],
+        ..PlayerBuild::default()
+    };
+    setup.details(MatchDetails {
+        parsed: false,
+        ..details(
+            1,
+            MatchPlayer {
+                build: Some(inventory_only.clone()),
+                ability_upgrades: None,
+                ..zeus(true)
+            },
+        )
+    });
+
+    let result = setup.run().await;
+
+    assert_eq!(result.wins.len(), 1);
+    assert_eq!(result.wins[0].build, inventory_only);
+    assert_eq!(result.wins[0].ability_upgrades, None);
 }
 
 #[tokio::test]
@@ -197,7 +226,7 @@ async fn non_league_candidates_are_discarded_without_fetching_details() {
 
 #[tokio::test]
 async fn each_invalid_match_is_discarded_with_its_reason() {
-    let setup = Setup::new((1..=6).map(|id| candidate(id, Some(100))).collect());
+    let setup = Setup::new((1..=5).map(|id| candidate(id, Some(100))).collect());
     setup.details(MatchDetails {
         league_id: None,
         ..details(1, zeus(true))
@@ -219,18 +248,14 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
             },
         )
     });
-    setup.details(MatchDetails {
-        parsed: false,
-        ..details(4, zeus(true))
-    });
     setup.details(details(
-        5,
+        4,
         MatchPlayer {
-            build: Some(PlayerBuild::default()),
+            build: None,
             ..zeus(true)
         },
     ));
-    // A partida 6 não tem resposta: a busca falha.
+    // A partida 5 não tem resposta: a busca falha.
 
     let result = setup.run().await;
 
@@ -238,12 +263,11 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
         (DiscardReason::NotProfessional, 1),
         (DiscardReason::OtherPatch, 1),
         (DiscardReason::UnknownPatch, 1),
-        (DiscardReason::NotParsed, 1),
         (DiscardReason::MissingPlayerData, 1),
         (DiscardReason::FetchFailed, 1),
     ]);
     assert_eq!(result.discarded, expected);
-    assert_eq!(result.valid_matches, 0);
+    assert!(result.wins.is_empty());
     assert!(matches!(
         result.error,
         Some(ProviderError::Unreachable { .. })
@@ -260,21 +284,7 @@ async fn player_patch_wins_over_the_match_patch() {
 
     let result = setup.run().await;
 
-    assert_eq!(result.valid_matches, 1);
-}
-
-#[tokio::test]
-async fn stops_after_thirty_valid_matches() {
-    let setup = Setup::new((1..=45).map(|id| candidate(id, Some(100))).collect());
-    for id in 1..=45 {
-        setup.details(details(id, zeus(true)));
-    }
-
-    let result = setup.run().await;
-
-    assert_eq!(result.valid_matches, 30);
-    assert_eq!(result.stopped_by, Some(ProBuildsStop::ValidLimit));
-    assert_eq!(result.calls, 31);
+    assert_eq!(result.wins.len(), 1);
 }
 
 #[tokio::test]
@@ -341,13 +351,13 @@ async fn exhausted_app_budget_returns_the_partial_result_with_the_cause() {
         setup.details(details(id, zeus(true)));
     }
     let budget = Arc::new(LimitedBudget {
-        limit: 4,
+        limit: 3,
         granted: AtomicU32::new(0),
     });
 
     let result = setup.run_with(budget, ProBuildLimits::default()).await;
 
-    assert_eq!(result.valid_matches, 3);
+    assert_eq!(match_ids(&result), [10, 9]);
     assert_eq!(result.stopped_by, Some(ProBuildsStop::Budget));
     assert!(matches!(
         result.error,
@@ -386,6 +396,6 @@ async fn cached_details_do_not_spend_calls() {
 
     let result = setup.run().await;
 
-    assert_eq!(result.valid_matches, 3);
+    assert_eq!(result.wins.len(), 3);
     assert_eq!(result.calls, 1, "só a lista");
 }

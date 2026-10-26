@@ -1,15 +1,15 @@
-//! Conteúdo da aba "Itens": builds de partidas profissionais e públicas para
-//! o herói e o modo da partida, e a popularidade de itens por fase. Cada
-//! bloco diz a fonte, o patch, se os dados são antigos e o tamanho da
-//! amostra. Também as linhas de estado compartilhadas pelas abas de
-//! recomendação.
+//! Conteúdo da aba "Itens": a build real das vitórias profissionais e
+//! públicas mais recentes do herói no modo da partida, e a popularidade de
+//! itens por fase. Cada bloco diz a fonte, o patch e se os dados são antigos.
+//! Também as linhas de estado compartilhadas pelas abas de recomendação.
 
 use crate::application::error::{Redactor, ToDiagnostic};
 use crate::application::ports::PublicWin;
 use crate::application::state::RecommendationStatus;
 use crate::application::use_cases::fallback::DataOrigin;
+use crate::application::use_cases::pro_builds::{PRO_WINS_SHOWN, ProWin};
 use crate::application::use_cases::recommendations::{PUBLIC_WINS_SHOWN, Recommendations};
-use crate::domain::builds::{BuildEvidence, MIN_SAMPLE, PlayerBuild, RankedBuild};
+use crate::domain::builds::PlayerBuild;
 use crate::domain::game::GameMode;
 use crate::domain::hero_catalog::HeroCatalog;
 use crate::domain::item_catalog::ItemCatalog;
@@ -156,10 +156,10 @@ fn ready_content(
     let header = vec![ready_header(recommendations, heroes)];
     let mut notes = vec![RowContent::new(
         Level::Info,
+        &translate("As vitórias públicas são de todas as faixas de rank e de qualquer posição."),
         &translate(
-            "Dados públicos de todas as faixas de rank; a recomendação não considera posição.",
+            "A posição (1 a 5) não vem do Dota, então as partidas não são separadas por ela.",
         ),
-        &translate("A posição (1 a 5) não vem do Dota, e as builds misturam todas as posições."),
     )];
     if mode == GameMode::Bots {
         notes.push(bots_note());
@@ -168,22 +168,20 @@ fn ready_content(
     let mut pro = Vec::new();
     if mode == GameMode::Turbo {
         pro.push(turbo_warning(&translate(
-            "Os tempos de compra destas builds não valem para o ritmo do turbo.",
+            "Os minutos de compra destas partidas não valem para o ritmo do turbo.",
         )));
     }
     let pro_builds = &recommendations.pro;
-    pro.extend(
-        pro_builds
-            .ranking
-            .builds
-            .iter()
-            .map(|build| build_row(build, items)),
-    );
-    if pro_builds.ranking.builds.is_empty() {
-        pro.push(insufficient_sample(
-            pro_builds.valid_matches,
-            &translate("partidas profissionais válidas"),
-        ));
+    pro.extend(pro_builds.wins.iter().flat_map(|win| {
+        let (heading, detail) = pro_win_heading(win);
+        win_rows(&heading, &detail, &win.build, items)
+    }));
+    if let Some(found) = found_row(
+        pro_builds.wins.len(),
+        PRO_WINS_SHOWN,
+        &examined_note(pro_builds.examined),
+    ) {
+        pro.push(found);
     }
     pro.push(source_row(
         &translate_with(
@@ -348,54 +346,33 @@ pub fn rank_label(tier: u32) -> Option<String> {
     }
 }
 
-/// Linha de uma build: itens na ordem de compra (ou sem ordem), taxa de
-/// vitória observada, amostra e tempos médios quando há ordem.
-pub fn build_row(build: &RankedBuild, items: &ItemCatalog) -> RowContent {
-    let names: Vec<&str> = build
-        .key
-        .items
-        .iter()
-        .map(|item| items.display_name(item))
-        .collect();
-    let (title, detail) = match build.key.evidence {
-        BuildEvidence::OrderedPurchaseLog => (
-            names.join(" → "),
-            build
-                .average_times
-                .as_ref()
-                .map(|times| {
-                    let times: Vec<String> =
-                        times.iter().map(|time| purchase_time(*time)).collect();
-                    translate_with("tempo médio: {}", &[&times.join(", ")])
-                })
-                .unwrap_or_default(),
-        ),
-        BuildEvidence::FinalInventoryUnordered => (
-            names.join(" + "),
-            translate("itens finais, sem ordem de compra"),
-        ),
-    };
-    let rate = translate_with(
-        "Taxa de vitória observada: {}% em {} partidas",
-        &[
-            &win_percent(build.wins, build.matches).to_string(),
-            &build.matches.to_string(),
-        ],
-    );
-    let subtitle = if detail.is_empty() {
-        rate
-    } else {
-        format!("{rate} · {detail}")
-    };
-    RowContent::new(Level::Info, &title, &subtitle)
+/// Cabeçalho de uma vitória profissional: a liga e, no detalhe, a data e a
+/// duração.
+pub fn pro_win_heading(win: &ProWin) -> (String, String) {
+    let recent = &win.hero_match;
+    let league = recent
+        .league_name
+        .clone()
+        .unwrap_or_else(|| translate("Liga sem nome"));
+    let mut details = Vec::new();
+    if let Some(start_time) = recent.start_time {
+        details.push(format_date(start_time));
+    }
+    if let Some(duration) = recent.duration_secs {
+        details.push(translate_with("duração {}", &[&format_duration(duration)]));
+    }
+    (
+        translate_with("Vitória profissional: {}", &[&league]),
+        details.join(" · "),
+    )
 }
 
-/// Porcentagem arredondada de `wins` em `matches`, sem ponto flutuante.
-pub fn win_percent(wins: usize, matches: usize) -> usize {
-    if matches == 0 {
-        return 0;
-    }
-    (wins * 200 + matches) / (2 * matches)
+/// Explicação de quantas vitórias profissionais apareceram.
+pub fn examined_note(examined: usize) -> String {
+    translate_with(
+        "Entre as {} partidas de liga recentes examinadas; derrotas, outros patches e partidas sem build ficam de fora.",
+        &[&examined.to_string()],
+    )
 }
 
 /// Momento de compra no relógio da partida; antes do início, sem relógio.
@@ -404,17 +381,6 @@ pub fn purchase_time(seconds: i32) -> String {
         Ok(seconds) => format_duration(seconds),
         Err(_) => translate("antes do início"),
     }
-}
-
-fn insufficient_sample(analyzed: usize, matches_kind: &str) -> RowContent {
-    RowContent::new(
-        Level::Info,
-        &translate("Amostra insuficiente"),
-        &translate_with(
-            "Nenhuma build com pelo menos {} partidas entre {} {}.",
-            &[&MIN_SAMPLE.to_string(), &analyzed.to_string(), matches_kind],
-        ),
-    )
 }
 
 /// Linha da fonte, com o aviso de dados antigos ou ausentes.

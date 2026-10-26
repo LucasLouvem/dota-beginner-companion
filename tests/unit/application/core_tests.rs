@@ -826,7 +826,6 @@ fn start_with_gated_hero(
         budget: Arc::new(UnlimitedBudget),
         cache: Arc::new(MemoryCache::default()),
         store: Arc::new(MemoryPublicBuildStore::default()),
-        items: Arc::default(),
         embedded_patches: Some(PatchCatalog::new(vec![Patch {
             id: 60,
             name: "7.41".into(),

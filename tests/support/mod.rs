@@ -18,5 +18,5 @@ pub use log_capture::{CapturedLogs, capture_logs};
 pub use memory_cache::MemoryCache;
 pub use memory_files::MemoryFiles;
 pub use memory_public_builds::MemoryPublicBuildStore;
-pub use recommendation_data::{pro_builds, public_win, recommendations, zeus_build};
+pub use recommendation_data::{pro_builds, pro_win, public_win, recommendations, zeus_build};
 pub use unlimited_budget::UnlimitedBudget;

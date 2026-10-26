@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::application::use_cases::fallback::DataOrigin;
-use crate::domain::builds::AbilityOrder;
+use crate::domain::builds::PlayerBuild;
 use crate::domain::hero_catalog::{AbilityInfo, AttackType, HeroInfo, PrimaryAttribute};
-use crate::test_support::{pro_builds, recommendations};
+use crate::test_support::{pro_builds, pro_win, recommendations};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,9 +31,8 @@ fn abilities() -> AbilityIdCatalog {
     ]))
 }
 
-fn ready(mode: GameMode, order: Option<AbilityOrder>) -> RecommendationStatus {
-    let mut pro = pro_builds(vec![], 30, Some(DataOrigin::Live));
-    pro.ability_order = order;
+fn ready(mode: GameMode, wins: Vec<ProWin>) -> RecommendationStatus {
+    let pro = pro_builds(wins, 12, Some(DataOrigin::Live));
     RecommendationStatus::Ready(Arc::new(recommendations(mode, pro, vec![])))
 }
 
@@ -42,40 +41,50 @@ fn content(status: &RecommendationStatus) -> Vec<Vec<RowContent>> {
 }
 
 #[test]
-fn most_common_order_lists_each_level_with_the_sample() {
-    let order = AbilityOrder {
-        ability_ids: vec![5110, 6000],
-        matches: 12,
-        analyzed: 30,
-    };
+fn each_win_shows_its_real_order_level_by_level() {
+    let wins = vec![
+        pro_win(2, PlayerBuild::default(), Some(vec![5110, 6000, 1])),
+        pro_win(1, PlayerBuild::default(), None),
+    ];
 
-    let sections = content(&ready(GameMode::AllPick, Some(order)));
+    let sections = content(&ready(GameMode::AllPick, wins));
 
     assert_eq!(sections.len(), 3);
     assert_eq!(sections[0][0].title, "Zeus · Escolha Livre · patch 7.41");
-    assert_eq!(sections[2][0].title, "Nível 1: Arc Lightning");
-    assert_eq!(sections[2][1].title, "Nível 2: Talento");
     assert_eq!(
-        sections[2][0].subtitle,
-        "Mais comum: 12 de 30 partidas profissionais válidas"
+        sections[2][0],
+        RowContent::new(
+            Level::Info,
+            "Vitória profissional: Liga Teste",
+            "duração 40:00 · 1 Arc Lightning → 2 Talento → 3 habilidade 1"
+        )
     );
+    assert_eq!(
+        sections[2][1].subtitle,
+        "duração 40:00 · Sem ordem de habilidades: a partida não foi analisada pelo OpenDota."
+    );
+    assert_eq!(sections[2][2].title, "2 vitórias recentes encontradas");
 }
 
 #[test]
-fn without_a_common_order_the_sample_is_insufficient() {
-    let sections = content(&ready(GameMode::AllPick, None));
+fn without_wins_the_tab_says_none_was_found() {
+    let sections = content(&ready(GameMode::AllPick, vec![]));
 
-    assert_eq!(sections[2][0].title, "Amostra insuficiente");
     assert_eq!(
-        sections[2][0].subtitle,
-        "Nenhuma ordem dos 10 primeiros níveis aparece em pelo menos 10 partidas entre 30 partidas profissionais válidas."
+        sections[2][0],
+        RowContent::new(
+            Level::Info,
+            "Nenhuma vitória recente encontrada",
+            "Entre as 12 partidas de liga recentes examinadas; derrotas, outros patches e partidas sem build ficam de fora."
+        )
     );
+    assert!(sections[2][1].title.starts_with("Fonte: OpenDota"));
 }
 
 #[test]
 fn turbo_and_bots_add_their_notes() {
-    let turbo = content(&ready(GameMode::Turbo, None));
-    let bots = content(&ready(GameMode::Bots, None));
+    let turbo = content(&ready(GameMode::Turbo, vec![]));
+    let bots = content(&ready(GameMode::Bots, vec![]));
 
     assert_eq!(turbo[1][1].title, "Partidas profissionais não são turbo");
     assert_eq!(

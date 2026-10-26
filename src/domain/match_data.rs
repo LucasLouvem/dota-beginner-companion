@@ -2,7 +2,7 @@
 //! validados: campo ausente ou com tipo errado vira `None`, nunca valor
 //! inventado. Os itens já estão com o nome interno (`item_black_king_bar`).
 
-use super::builds::{PlayerBuild, PlayerMatch};
+use super::builds::PlayerBuild;
 use super::game::GameMode;
 
 /// `game_mode` do Dota (no dotaconstants) da Escolha Livre comum e da
@@ -131,18 +131,6 @@ pub struct MatchPlayer {
     pub build: Option<PlayerBuild>,
     /// IDs das habilidades na ordem em que foram evoluídas.
     pub ability_upgrades: Option<Vec<u32>>,
-}
-
-impl MatchPlayer {
-    /// Dados para montar a build, quando há resultado e inventário.
-    pub fn build_input(&self) -> Option<PlayerMatch> {
-        let build = self.build.as_ref()?;
-        Some(PlayerMatch {
-            won: self.won?,
-            purchase_log: build.purchases.clone(),
-            final_items: build.inventory.clone(),
-        })
-    }
 }
 
 #[cfg(test)]
