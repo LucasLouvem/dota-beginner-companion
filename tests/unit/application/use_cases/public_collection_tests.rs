@@ -45,6 +45,8 @@ fn summary(match_id: u64, game_mode: u32, lobby_type: u32) -> PublicMatchSummary
 
 fn player(hero_id: u32, patch_id: Option<u32>) -> MatchPlayer {
     MatchPlayer {
+        stats: Default::default(),
+        kda: None,
         hero_id,
         won: Some(true),
         patch_id,
@@ -122,6 +124,8 @@ fn sample_provider() -> Arc<FakeStatsProvider> {
             vec![
                 player(22, Some(PATCH)),
                 MatchPlayer {
+                    stats: Default::default(),
+                    kda: None,
                     build: None,
                     ..player(49, Some(PATCH))
                 },
@@ -303,6 +307,8 @@ async fn empty_listing_restarts_from_the_newest_matches() {
 #[test]
 fn only_winners_with_a_build_are_kept_with_the_whole_build() {
     let analyzed = MatchPlayer {
+        stats: Default::default(),
+        kda: None,
         build: Some(PlayerBuild {
             inventory: vec!["item_blink".into()],
             purchases: Some(vec![Purchase {
@@ -318,10 +324,14 @@ fn only_winners_with_a_build_are_kept_with_the_whole_build() {
         vec![
             analyzed.clone(),
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 won: Some(false),
                 ..player(49, Some(PATCH))
             },
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 build: None,
                 ..player(50, Some(PATCH))
             },
@@ -349,10 +359,14 @@ fn players_without_patch_or_result_are_left_out() {
         vec![
             player(1, None),
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 won: None,
                 ..player(2, Some(PATCH))
             },
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 build: Some(PlayerBuild {
                     inventory: vec!["item_satanic".into()],
                     ..PlayerBuild::default()

@@ -18,7 +18,10 @@ fn caption_joins_the_state_marker_and_the_time() {
         chip_caption(&chip(Some(754), Some(StepState::Done))),
         "✓ 12:34"
     );
-    assert_eq!(chip_caption(&chip(None, Some(StepState::Next))), "→");
+    assert_eq!(
+        chip_caption(&chip(None, Some(StepState::Next))),
+        "→ próximo"
+    );
     assert_eq!(chip_caption(&chip(Some(-89), None)), "antes do início");
     assert_eq!(chip_caption(&chip(None, Some(StepState::Pending))), "");
 }
@@ -27,12 +30,12 @@ fn caption_joins_the_state_marker_and_the_time() {
 fn grid_cells_mark_only_the_row_of_each_point() {
     let grid = AbilityGrid {
         rows: vec!["Lightning Bolt".into(), "Arc Lightning".into()],
+        images: vec![None, None],
         points: vec![
             (0, StepState::Done),
             (1, StepState::Next),
             (0, StepState::Pending),
         ],
-        max_order: String::new(),
         summary: String::new(),
     };
 
@@ -43,8 +46,8 @@ fn grid_cells_mark_only_the_row_of_each_point() {
 fn grid_cells_ignore_a_point_outside_the_rows() {
     let grid = AbilityGrid {
         rows: vec!["Lightning Bolt".into()],
+        images: vec![None],
         points: vec![(5, StepState::Done)],
-        max_order: String::new(),
         summary: String::new(),
     };
     assert_eq!(grid_cells(&grid), [vec![""]]);

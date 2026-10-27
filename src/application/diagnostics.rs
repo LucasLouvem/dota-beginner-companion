@@ -94,6 +94,8 @@ pub struct DiagnosticReport {
     pub installs: Vec<InstallCheck>,
     /// Detectado pela lista de processos (`/proc/*/comm`), sem ler memória.
     pub dota_process_running: bool,
+    /// Detectado da mesma forma: só o processo `steam`.
+    pub steam_process_running: bool,
 }
 
 #[cfg(test)]

@@ -80,6 +80,8 @@ pub struct AbilityInfo {
     pub name: String,
     /// Nome de exibição da fonte, em inglês.
     pub display_name: String,
+    /// Caminho da imagem da habilidade no CDN da Steam, como na fonte.
+    pub image_path: Option<String>,
 }
 
 /// Dados estáticos de um herói.
@@ -94,6 +96,8 @@ pub struct HeroInfo {
     pub attack_type: AttackType,
     pub roles: Vec<HeroRole>,
     pub abilities: Vec<AbilityInfo>,
+    /// Caminho do retrato no CDN da Steam, como na fonte.
+    pub image_path: Option<String>,
 }
 
 impl HeroInfo {
@@ -132,6 +136,20 @@ impl HeroCatalog {
         self.heroes
             .iter()
             .find_map(|hero| hero.ability_display_name(ability))
+    }
+
+    /// Caminho da imagem de um herói (pelo nome interno, `npc_dota_hero_*`)
+    /// ou de uma habilidade (pelo nome interno dela).
+    pub fn image_path_of(&self, key: &str) -> Option<&str> {
+        if key.starts_with("npc_dota_hero_") {
+            return self.by_name(key)?.image_path.as_deref();
+        }
+        self.heroes
+            .iter()
+            .flat_map(|hero| &hero.abilities)
+            .find(|ability| ability.name == key)?
+            .image_path
+            .as_deref()
     }
 
     pub fn len(&self) -> usize {

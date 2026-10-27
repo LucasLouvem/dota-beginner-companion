@@ -8,6 +8,7 @@
   - de `heroes.json`: `id`, `name`, `localized_name`, `primary_attr`, `attack_type` e `roles`;
   - de `hero_abilities.json`: as habilidades, sem `generic_hidden`;
   - de `abilities.json`: o `dname` de cada habilidade, como `display_name`. Habilidades sem `dname` ficam de fora.
+- `img` (acrescentado em 2026-10-26, do mesmo commit): o caminho do retrato do herói (`build/heroes.json`, sem o `?` final) e o da imagem de cada habilidade (`build/abilities.json`), no CDN da Steam (ex.: `/apps/dota2/images/dota_react/heroes/zuus.png`). Os 127 heróis e as 785 habilidades listadas têm `img`. O aplicativo baixa as imagens em tempo de execução para o cache local; elas são da Valve e não fazem parte do repositório.
 - Um herói por linha, ordenados por `id`.
 - Os textos estão em inglês, como na origem. Os nomes de exibição não foram corrigidos: alguns vêm assim da fonte (ex.: `APPLICATION DAMAGE:` no Batrider).
 

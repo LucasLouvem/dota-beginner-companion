@@ -1,4 +1,4 @@
-//! Janela principal: barra lateral com as abas e indicador de conexão.
+//! Janela principal: abas no topo e indicador de conexão.
 
 use relm4::adw::prelude::*;
 use relm4::{
@@ -20,10 +20,6 @@ use super::pages::{
     self,
     diagnostics::{DiagnosticsMessage, DiagnosticsPage},
     hero::{HeroMessage, HeroPage, HeroPageInit},
-    recommendation_page::{
-        RecommendationCatalogs, RecommendationMessage, RecommendationPage, RecommendationPageInit,
-        RecommendationTab,
-    },
 };
 
 /// Canais de comunicação entre a janela e o núcleo, e os dados embutidos.
@@ -99,11 +95,13 @@ pub async fn forward_snapshots(
     }
 }
 
+/// Largura mínima da janela: a página da build não tem composição para menos
+/// de 760sp (as margens laterais somam 24). Em larguras menores a página
+/// travava, então a janela simplesmente não encolhe mais que isso.
+const MIN_WINDOW_WIDTH: i32 = 790;
 /// Componente raiz da janela principal.
 pub struct App {
     hero: Controller<HeroPage>,
-    /// Abas Habilidades, Itens e Dados profissionais.
-    recommendation_pages: Vec<Controller<RecommendationPage>>,
     diagnostics: Controller<DiagnosticsPage>,
     /// Leitura do estado mais recente quando chega `CoreUpdate::Changed`.
     state: watch::Receiver<AppSnapshot>,
@@ -126,9 +124,9 @@ impl Component for App {
     fn init_root() -> Self::Root {
         adw::ApplicationWindow::builder()
             .title(translate("Dota Beginner Companion"))
-            .default_width(1000)
-            .default_height(720)
-            .width_request(360)
+            .default_width(1180)
+            .default_height(860)
+            .width_request(MIN_WINDOW_WIDTH)
             .height_request(400)
             .build()
     }
@@ -138,22 +136,8 @@ impl Component for App {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let catalogs = RecommendationCatalogs {
-            heroes: Arc::clone(&core.heroes),
-        };
-        let recommendation_pages: Vec<(&str, String, Controller<RecommendationPage>)> =
-            [("pro", RecommendationTab::ProMatches)]
-                .into_iter()
-                .map(|(name, tab)| {
-                    let page = RecommendationPage::builder()
-                        .launch(RecommendationPageInit {
-                            tab,
-                            catalogs: catalogs.clone(),
-                        })
-                        .detach();
-                    (name, tab.title(), page)
-                })
-                .collect();
+        // O GTK já abriu a tela; o estilo vale para a janela inteira.
+        super::style::install();
         let hero = HeroPage::builder()
             .launch(HeroPageInit {
                 commands: core.commands.clone(),
@@ -166,40 +150,46 @@ impl Component for App {
             .launch(core.commands.clone())
             .detach();
 
-        let stack = gtk::Stack::new();
+        // As abas ficam no topo, lado a lado, para dar a largura toda ao
+        // conteúdo.
+        let stack = adw::ViewStack::new();
         stack.set_hexpand(true);
-        stack.add_titled(hero.widget(), Some("hero"), &translate("Herói"));
-        for (name, title, page) in &recommendation_pages {
-            stack.add_titled(page.widget(), Some(name), title);
-        }
+        stack.add_titled_with_icon(
+            hero.widget(),
+            Some("hero"),
+            &translate("Herói"),
+            "avatar-default-symbolic",
+        );
         for (name, title, page) in pages::tabs() {
-            stack.add_titled(&page, Some(name), &title);
+            let icon = match name {
+                "history" => "document-open-recent-symbolic",
+                _ => "emblem-system-symbolic",
+            };
+            stack.add_titled_with_icon(&page, Some(name), &title, icon);
         }
-        stack.add_titled(
+        stack.add_titled_with_icon(
             diagnostics.widget(),
             Some("diagnostics"),
             &translate("Diagnóstico"),
+            "utilities-system-monitor-symbolic",
         );
         // A aba Diagnóstico abre por padrão.
         stack.set_visible_child_name("diagnostics");
 
-        let sidebar = gtk::StackSidebar::new();
-        sidebar.set_stack(&stack);
-        sidebar.set_width_request(180);
-
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body.append(&sidebar);
-        body.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-        body.append(&stack);
+        let switcher = adw::ViewSwitcher::builder()
+            .stack(&stack)
+            .policy(adw::ViewSwitcherPolicy::Wide)
+            .build();
 
         let connection = gtk::Label::new(None);
         connection.add_css_class("dim-label");
         let header = adw::HeaderBar::new();
+        header.set_title_widget(Some(&switcher));
         header.pack_end(&connection);
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
-        toolbar.set_content(Some(&body));
+        toolbar.set_content(Some(&stack));
         root.set_content(Some(&toolbar));
 
         let state = core.state.clone();
@@ -219,10 +209,6 @@ impl Component for App {
         ComponentParts {
             model: App {
                 hero,
-                recommendation_pages: recommendation_pages
-                    .into_iter()
-                    .map(|(_, _, page)| page)
-                    .collect(),
                 diagnostics,
                 state: window_state,
                 pending,
@@ -247,11 +233,6 @@ impl Component for App {
                 widgets.connection.set_label(&connection_label(&snapshot));
                 self.hero
                     .emit(HeroMessage::Snapshot(Box::new((*snapshot).clone())));
-                for page in &self.recommendation_pages {
-                    page.emit(RecommendationMessage::Snapshot(Box::new(
-                        (*snapshot).clone(),
-                    )));
-                }
                 self.diagnostics
                     .emit(DiagnosticsMessage::Snapshot(snapshot));
             }

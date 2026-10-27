@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use crate::domain::builds::PlayerBuild;
 use crate::domain::dota_install::DotaInstall;
 use crate::domain::gsi_config::GsiEndpoint;
-use crate::domain::match_data::{HeroMatch, ItemPopularity, MatchDetails, PublicMatchSummary};
+use crate::domain::match_data::{HeroMatch, ItemPopularity, Kda, MatchDetails, PublicMatchSummary};
 use crate::domain::patch::PatchCatalog;
 
 use super::error::{Diagnostic, DiagnosticCode, Redactor, ToDiagnostic, UiText, technical_details};
@@ -31,9 +31,10 @@ pub trait DotaLocator: Send + Sync {
     fn locate(&self) -> LocatorResult;
 }
 
-/// Informa se o Dota 2 está em execução.
+/// Informa se o Dota 2 e a Steam estão em execução.
 pub trait ProcessProbe: Send + Sync {
     fn dota_running(&self) -> bool;
+    fn steam_running(&self) -> bool;
 }
 
 /// Acesso aos arquivos de configuração GSI. Mantém a política
@@ -544,6 +545,9 @@ pub struct PublicWin {
     /// Rank médio da partida.
     pub avg_rank_tier: Option<u32>,
     pub build: PlayerBuild,
+    /// Resultado do jogador na partida; ausente nas linhas guardadas antes
+    /// de o aplicativo ler esses números.
+    pub kda: Option<Kda>,
 }
 
 /// Vitórias de partidas públicas e o ponto em que a coleta parou.
@@ -570,8 +574,8 @@ pub trait PublicBuildStore: Send + Sync {
     fn purge_other_patches(&self, patch_id: u32) -> Result<usize, StorageError>;
 }
 
-/// Falha ao obter a imagem de um item. Nunca impede o resto da página: o
-/// nome do item aparece no lugar.
+/// Falha ao obter a imagem de um item, herói ou habilidade. Nunca impede o
+/// resto da página: o nome aparece no lugar.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ItemIconError {
     #[error("não foi possível conectar ao CDN da Steam ({path})")]
@@ -588,11 +592,11 @@ pub enum ItemIconError {
     },
     #[error("o CDN da Steam respondeu com HTTP {status} ({path})")]
     UnexpectedStatus { path: String, status: u16 },
-    #[error("a imagem do item passou de {limit} bytes ({path})")]
+    #[error("a imagem passou de {limit} bytes ({path})")]
     TooLarge { path: String, limit: usize },
     #[error("o arquivo recebido não é uma imagem PNG ({path})")]
     NotPng { path: String },
-    #[error("o caminho da imagem não é do CDN de itens do Dota ({path})")]
+    #[error("o caminho da imagem não é de uma pasta de imagens do Dota no CDN ({path})")]
     UnexpectedPath { path: String },
     #[error("não foi possível ler ou gravar a imagem guardada em {}", path.display())]
     Cache {

@@ -114,11 +114,11 @@ async fn slow_image_times_out() {
 }
 
 #[tokio::test]
-async fn path_outside_the_item_images_is_refused_without_a_request() {
+async fn path_outside_the_image_folders_is_refused_without_a_request() {
     let (icons, requests) = icons().await;
 
     for path in [
-        "/apps/dota2/images/dota_react/heroes/zuus.png",
+        "/apps/dota2/images/dota_react/heroes/icons/zuus.png",
         "/apps/dota2/images/dota_react/items/../../secret.png",
         "https://example.com/blink.png",
     ] {
@@ -152,14 +152,24 @@ async fn closed_server_is_unreachable() {
 
 #[test]
 fn item_image_paths_are_checked_by_folder_name_and_version() {
-    assert!(is_item_image_path(&format!("{ITEMS}/blink.png")));
-    assert!(is_item_image_path(&format!(
+    assert!(is_image_path(&format!("{ITEMS}/blink.png")));
+    assert!(is_image_path(&format!(
         "{ITEMS}/enhancement_greedy.png?t=1"
     )));
-    assert!(!is_item_image_path(&format!("{ITEMS}/.png")));
-    assert!(!is_item_image_path(&format!("{ITEMS}/Blink.png")));
-    assert!(!is_item_image_path(&format!("{ITEMS}/blink.jpg")));
-    assert!(!is_item_image_path(&format!("{ITEMS}/blink.png?t=")));
-    assert!(!is_item_image_path(&format!("{ITEMS}/blink.png?x=1")));
-    assert!(!is_item_image_path(&format!("{ITEMS}/sub/blink.png")));
+    assert!(!is_image_path(&format!("{ITEMS}/.png")));
+    assert!(!is_image_path(&format!("{ITEMS}/Blink.png")));
+    assert!(!is_image_path(&format!("{ITEMS}/blink.jpg")));
+    assert!(!is_image_path(&format!("{ITEMS}/blink.png?t=")));
+    assert!(!is_image_path(&format!("{ITEMS}/blink.png?x=1")));
+    assert!(!is_image_path(&format!("{ITEMS}/sub/blink.png")));
+    assert!(is_image_path(
+        "/apps/dota2/images/dota_react/heroes/zuus.png"
+    ));
+    assert!(is_image_path(
+        "/apps/dota2/images/dota_react/abilities/zuus_arc_lightning.png"
+    ));
+    assert!(!is_image_path(
+        "/apps/dota2/images/dota_react/heroes/icons/zuus.png"
+    ));
+    assert!(!is_image_path("/apps/dota2/images/other/zuus.png"));
 }

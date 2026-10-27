@@ -37,6 +37,7 @@ pub fn run_diagnostics(
         searched_libraries: located.searched_libraries,
         installs,
         dota_process_running: probe.dota_running(),
+        steam_process_running: probe.steam_running(),
     }
 }
 

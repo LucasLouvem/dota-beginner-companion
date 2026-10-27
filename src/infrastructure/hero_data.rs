@@ -39,12 +39,16 @@ struct HeroRecord {
     attack_type: String,
     roles: Vec<String>,
     abilities: Vec<AbilityRecord>,
+    #[serde(default)]
+    img: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct AbilityRecord {
     name: String,
     display_name: String,
+    #[serde(default)]
+    img: Option<String>,
 }
 
 /// Catálogo com os dados embutidos.
@@ -77,8 +81,10 @@ fn hero_info(record: HeroRecord) -> HeroInfo {
             .map(|ability| AbilityInfo {
                 name: ability.name,
                 display_name: ability.display_name,
+                image_path: ability.img,
             })
             .collect(),
+        image_path: record.img,
     }
 }
 

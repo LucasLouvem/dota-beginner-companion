@@ -75,6 +75,7 @@ pub fn public_wins(
                 start_time: details.start_time.or(summary.start_time),
                 avg_rank_tier: summary.avg_rank_tier,
                 build: player.build.clone()?,
+                kda: player.kda,
             })
         })
         .collect();

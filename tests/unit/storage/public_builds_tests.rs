@@ -36,6 +36,7 @@ fn inventory_only() -> PlayerBuild {
 
 fn win(match_id: u64, hero_id: u32, game_mode: u32, patch_id: u32) -> PublicWin {
     PublicWin {
+        kda: None,
         match_id,
         hero_id,
         game_mode,
@@ -61,10 +62,12 @@ fn match_ids(wins: &[PublicWin]) -> Vec<u64> {
 fn saved_win_is_read_back_with_the_whole_build() {
     let (_temp_dir, store) = temp_store();
     let full = PublicWin {
+        kda: None,
         build: full_build(),
         ..win(1, 22, 23, 60)
     };
     let without_extras = PublicWin {
+        kda: None,
         start_time: None,
         avg_rank_tier: None,
         ..win(2, 22, 23, 60)
@@ -91,6 +94,7 @@ fn recent_wins_come_newest_first_up_to_the_limit() {
             .unwrap();
     }
     let same_time = PublicWin {
+        kda: None,
         start_time: Some(1_792_970_004),
         ..win(5, 22, 22, 60)
     };
@@ -135,6 +139,7 @@ fn the_same_hero_in_the_same_match_is_saved_once() {
     let (_temp_dir, store) = temp_store();
     let first = win(1, 22, 1, 60);
     let repeated = PublicWin {
+        kda: None,
         build: full_build(),
         ..win(1, 22, 1, 60)
     };
@@ -222,9 +227,9 @@ fn rows_that_do_not_read_as_a_build_are_skipped_without_using_the_limit() {
         .unwrap()
         .execute_batch(
             "INSERT INTO public_wins VALUES
-                (2, 22, 23, 60, 1792970002, NULL, 'outra', '[]', NULL, NULL, NULL);
+                (2, 22, 23, 60, 1792970002, NULL, 'outra', '[]', NULL, NULL, NULL, NULL, NULL, NULL);
              INSERT INTO public_wins VALUES
-                (3, 22, 23, 60, 1792970003, NULL, '[]', '[]', NULL, NULL, '[{\"item\": 1}]');",
+                (3, 22, 23, 60, 1792970003, NULL, '[]', '[]', NULL, NULL, '[{\"item\": 1}]', NULL, NULL, NULL);",
         )
         .unwrap();
 
@@ -232,4 +237,35 @@ fn rows_that_do_not_read_as_a_build_are_skipped_without_using_the_limit() {
         match_ids(&store.recent_wins(22, &[23], 60, 1).unwrap()),
         [1]
     );
+}
+
+#[test]
+fn result_is_saved_and_read_back_and_needs_all_three_numbers() {
+    let (temp_dir, store) = temp_store();
+    let path = temp_dir.path().join("companion.sqlite3");
+    let with_kda = PublicWin {
+        kda: Some(Kda {
+            kills: 3,
+            deaths: 8,
+            assists: 16,
+        }),
+        ..win(1, 22, 23, 60)
+    };
+    store
+        .save_match(&[with_kda.clone(), win(2, 22, 23, 60)], 1)
+        .unwrap();
+    // Uma linha com só dois dos três números não vira resultado.
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE public_wins SET kills = 1, deaths = 2, assists = NULL WHERE match_id = 2",
+            [],
+        )
+        .unwrap();
+
+    let wins = store.recent_wins(22, &[23], 60, 5).unwrap();
+
+    let by_id = |id| wins.iter().find(|win| win.match_id == id).unwrap();
+    assert_eq!(by_id(1).kda, with_kda.kda);
+    assert_eq!(by_id(2).kda, None);
 }

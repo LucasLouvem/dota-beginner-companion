@@ -33,7 +33,9 @@ pub fn pro_builds(wins: Vec<ProWin>, examined: usize, origin: Option<DataOrigin>
 /// habilidades dadas.
 pub fn pro_win(match_id: u64, build: PlayerBuild, ability_upgrades: Option<Vec<u32>>) -> ProWin {
     ProWin {
+        stats: Default::default(),
         hero_match: HeroMatch {
+            kda: None,
             match_id,
             start_time: None,
             league_id: Some(18631),
@@ -105,6 +107,7 @@ pub fn zeus_build() -> PlayerBuild {
 /// Vitória pública do Zeus no Turbo, em 25/10/2026, com rank médio Lenda 1.
 pub fn public_win(match_id: u64, build: PlayerBuild) -> PublicWin {
     PublicWin {
+        kda: None,
         match_id,
         hero_id: 22,
         game_mode: 23,

@@ -62,7 +62,7 @@ fn new_database_gets_every_table_and_the_current_version() {
 
     let connection = open_database(&temp_dir.path().join("data/companion.sqlite3")).unwrap();
 
-    assert_eq!(user_version(&connection), 3);
+    assert_eq!(user_version(&connection), 5);
     assert_eq!(
         table_names(&connection),
         ["cache", "call_budget", "collection_cursor", "public_wins"]
@@ -77,7 +77,7 @@ fn version_two_database_drops_old_builds_and_match_details_and_keeps_the_rest() 
 
     let connection = open_database(&path).unwrap();
 
-    assert_eq!(user_version(&connection), 3);
+    assert_eq!(user_version(&connection), 5);
     assert_eq!(
         table_names(&connection),
         ["cache", "call_budget", "collection_cursor", "public_wins"]
@@ -86,16 +86,76 @@ fn version_two_database_drops_old_builds_and_match_details_and_keeps_the_rest() 
         .query_row(
             "SELECT (SELECT value FROM cache WHERE key = 'heroes'),
                     (SELECT used FROM call_budget),
-                    (SELECT less_than_match_id FROM collection_cursor)",
+                    (SELECT COUNT(*) FROM collection_cursor)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(kept, ("[22]".to_owned(), 12, 9_061_960_072));
+    assert_eq!(
+        kept,
+        ("[22]".to_owned(), 12, 0),
+        "o cursor também volta ao início, pela versão 4"
+    );
     let cached_keys: i64 = connection
         .query_row("SELECT COUNT(*) FROM cache", [], |row| row.get(0))
         .unwrap();
     assert_eq!(cached_keys, 1, "só os detalhes de partida saem do cache");
+}
+
+/// Banco na versão 3, com uma vitória pública, o cursor e dois valores no
+/// cache (um detalhe de partida e outro dado).
+fn version_three_database(path: &std::path::Path) {
+    let connection = Connection::open(path).unwrap();
+    for sql in &MIGRATIONS[..3] {
+        connection.execute_batch(sql).unwrap();
+    }
+    connection
+        .execute_batch(
+            "INSERT INTO public_wins
+                (match_id, hero_id, game_mode, patch_id, start_time, avg_rank_tier,
+                 inventory, backpack, neutral, neutral_enhancement, purchases)
+             VALUES (1, 22, 23, 60, NULL, NULL, '[]', '[]', NULL, NULL, NULL);
+             INSERT INTO collection_cursor VALUES (1, 9061960072);
+             INSERT INTO cache VALUES ('heroes', '[22]', 0);
+             INSERT INTO cache VALUES ('stats/matches/1', '{}', 0);
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
+}
+
+#[test]
+fn version_three_database_drops_old_wins_cursor_and_match_details_and_gains_the_result_columns() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().join("companion.sqlite3");
+    version_three_database(&path);
+
+    let connection = open_database(&path).unwrap();
+
+    assert_eq!(user_version(&connection), 5);
+    let (wins, cursors, cached): (i64, i64, i64) = connection
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM public_wins),
+                    (SELECT COUNT(*) FROM collection_cursor),
+                    (SELECT COUNT(*) FROM cache WHERE key LIKE 'stats/matches/%')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((wins, cursors, cached), (0, 0, 0));
+    let heroes: String = connection
+        .query_row("SELECT value FROM cache WHERE key = 'heroes'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(heroes, "[22]", "o resto do cache fica");
+    connection
+        .execute(
+            "INSERT INTO public_wins
+                (match_id, hero_id, game_mode, patch_id, inventory, backpack, kills, deaths, assists)
+             VALUES (2, 22, 23, 60, '[]', '[]', 3, 8, 16)",
+            [],
+        )
+        .expect("as colunas novas existem");
 }
 
 #[test]
@@ -128,7 +188,7 @@ fn version_one_database_is_migrated_and_keeps_the_cache() {
 
     let connection = open_database(&path).unwrap();
 
-    assert_eq!(user_version(&connection), 3);
+    assert_eq!(user_version(&connection), 5);
     let cached: String = connection
         .query_row("SELECT value FROM cache WHERE key = 'heroes'", [], |row| {
             row.get(0)
@@ -259,10 +319,10 @@ fn database_from_newer_app_version_is_refused_without_changes() {
         diagnostic
             .technical_details
             .as_deref()
-            .is_some_and(|details| details.contains("versão de schema 4")),
+            .is_some_and(|details| details.contains("versão de schema 6")),
         "{diagnostic:?}"
     );
     let connection = Connection::open(&path).unwrap();
-    assert_eq!(user_version(&connection), 4);
+    assert_eq!(user_version(&connection), 6);
     assert!(table_names(&connection).is_empty());
 }

@@ -12,7 +12,8 @@ use crate::application::ports::{
 use crate::domain::builds::{PlayerBuild, Purchase, in_purchase_order};
 use crate::domain::item_catalog::ItemCatalog;
 use crate::domain::match_data::{
-    HeroMatch, ItemPopularity, MatchDetails, MatchPlayer, PopularityPhase, PublicMatchSummary,
+    FinalStats, HeroMatch, ItemPopularity, Kda, MatchDetails, MatchPlayer, PopularityPhase,
+    PublicMatchSummary,
 };
 use crate::domain::patch::{Patch, PatchCatalog};
 
@@ -42,7 +43,7 @@ const MATCH_FIELDS: [&str; 7] = [
     "start_time",
     "radiant_win",
 ];
-const PLAYER_FIELDS: [&str; 17] = [
+const PLAYER_FIELDS: [&str; 27] = [
     "hero_id",
     "win",
     "patch",
@@ -60,6 +61,16 @@ const PLAYER_FIELDS: [&str; 17] = [
     "item_neutral",
     "item_neutral2",
     "isRadiant",
+    "kills",
+    "deaths",
+    "assists",
+    "last_hits",
+    "denies",
+    "gold_per_min",
+    "xp_per_min",
+    "net_worth",
+    "obs_placed",
+    "sen_placed",
 ];
 
 /// Caminho da API de cada consulta.
@@ -173,6 +184,7 @@ fn decode_hero_matches(raw: &str) -> Result<Vec<HeroMatch>, ProviderError> {
                     .zip(radiant)
                     .map(|(win, radiant)| win == radiant),
                 duration_secs: unsigned(entry, "duration"),
+                kda: kda(entry),
             })
         })
         .collect())
@@ -286,6 +298,16 @@ fn decode_player(player: &Value, items: &ItemCatalog) -> Option<MatchPlayer> {
             .and_then(Value::as_u64)
             .map(|win| win == 1),
         patch_id: unsigned(player, "patch"),
+        kda: kda(player),
+        stats: FinalStats {
+            last_hits: unsigned(player, "last_hits"),
+            denies: unsigned(player, "denies"),
+            gpm: unsigned(player, "gold_per_min"),
+            xpm: unsigned(player, "xp_per_min"),
+            net_worth: unsigned(player, "net_worth"),
+            observers_placed: unsigned(player, "obs_placed"),
+            sentries_placed: unsigned(player, "sen_placed"),
+        },
         build: player_build(player, items),
         ability_upgrades: player
             .get("ability_upgrades_arr")
@@ -364,6 +386,15 @@ fn reduce_match(value: &Value) -> Value {
         );
     }
     Value::Object(reduced)
+}
+
+/// Abates, mortes e assistências; sem os três números, "sem dado".
+fn kda(value: &Value) -> Option<Kda> {
+    Some(Kda {
+        kills: unsigned(value, "kills")?,
+        deaths: unsigned(value, "deaths")?,
+        assists: unsigned(value, "assists")?,
+    })
 }
 
 /// Inteiro sem sinal que cabe em `u32`; outro tipo ou valor é "sem dado".

@@ -53,6 +53,9 @@ impl ProcessProbe for ClosedDota {
     fn dota_running(&self) -> bool {
         false
     }
+    fn steam_running(&self) -> bool {
+        false
+    }
 }
 
 /// Núcleo em execução e os canais que a interface e o servidor usariam.

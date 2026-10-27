@@ -5,6 +5,8 @@ use crate::domain::builds::PlayerBuild;
 
 fn player(patch_id: Option<u32>) -> MatchPlayer {
     MatchPlayer {
+        stats: Default::default(),
+        kda: None,
         hero_id: 22,
         won: Some(true),
         patch_id,

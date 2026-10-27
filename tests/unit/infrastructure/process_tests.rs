@@ -26,6 +26,16 @@ fn reports_not_running_when_no_process_is_named_dota2() {
 }
 
 #[test]
+fn reports_steam_only_for_the_client_process() {
+    let helpers = fake_proc(&[("1", "steamwebhelper"), ("2", "steam-runtime-l")]);
+    let client = fake_proc(&[("1", "systemd"), ("77", "steam")]);
+
+    assert!(!ProcProbe::new(helpers.path().into()).steam_running());
+    assert!(ProcProbe::new(client.path().into()).steam_running());
+    assert!(!ProcProbe::new(client.path().into()).dota_running());
+}
+
+#[test]
 fn ignores_entries_that_are_not_process_ids() {
     let proc_root = fake_proc(&[("self", "dota2")]);
     assert!(!ProcProbe::new(proc_root.path().into()).dota_running());

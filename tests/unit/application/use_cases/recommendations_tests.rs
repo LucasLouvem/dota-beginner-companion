@@ -107,6 +107,7 @@ fn no_key_without_hero_id_or_patch() {
 fn store_wins(store: &MemoryPublicBuildStore, match_ids: std::ops::Range<u64>, game_mode: u32) {
     for match_id in match_ids {
         let win = PublicWin {
+            kda: None,
             game_mode,
             start_time: Some(1_792_970_000 + match_id as i64),
             ..public_win(match_id, zeus_build())
@@ -254,46 +255,4 @@ fn unknown_build_id_is_none_without_panic() {
     let recommendations = listed();
     assert_eq!(recommendations.build(&id(BuildSource::Public, 30)), None);
     assert_eq!(recommendations.build(&id(BuildSource::Pro, 999)), None);
-}
-
-#[test]
-fn selection_is_kept_for_the_same_query_and_reset_otherwise() {
-    let recommendations = listed();
-    let chosen = id(BuildSource::Public, 10);
-    let same_query = (recommendations.key.clone(), chosen);
-    let other_mode = (
-        RecommendationKey {
-            mode: GameMode::Turbo,
-            ..recommendations.key.clone()
-        },
-        chosen,
-    );
-    let vanished = (recommendations.key.clone(), id(BuildSource::Pro, 999));
-
-    assert_eq!(
-        recommendations.resolve_selection(Some(&same_query)),
-        Some(chosen)
-    );
-    assert_eq!(
-        recommendations.resolve_selection(Some(&other_mode)),
-        Some(id(BuildSource::Pro, 30))
-    );
-    assert_eq!(
-        recommendations.resolve_selection(Some(&vanished)),
-        Some(id(BuildSource::Pro, 30))
-    );
-    assert_eq!(
-        recommendations.resolve_selection(None),
-        Some(id(BuildSource::Pro, 30))
-    );
-}
-
-#[test]
-fn without_builds_there_is_no_selection() {
-    let empty = crate::test_support::recommendations(
-        GameMode::AllPick,
-        crate::test_support::pro_builds(vec![], 0, None),
-        vec![],
-    );
-    assert_eq!(empty.resolve_selection(None), None);
 }

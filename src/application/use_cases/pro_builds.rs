@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::application::ports::{CallCategory, ProviderError, StatsProvider, StatsQuery};
 use crate::domain::builds::PlayerBuild;
-use crate::domain::match_data::{HeroMatch, MatchDetails};
+use crate::domain::match_data::{FinalStats, HeroMatch, MatchDetails};
 
 use super::call_budget::QueryBudget;
 use super::external_sources::ExternalSources;
@@ -79,6 +79,8 @@ pub struct ProWin {
     /// IDs das habilidades na ordem em que foram evoluídas; ausente em
     /// partida não analisada.
     pub ability_upgrades: Option<Vec<u32>>,
+    /// Totais finais do jogador na partida.
+    pub stats: FinalStats,
 }
 
 /// Resultado da consulta.
@@ -177,10 +179,11 @@ pub async fn load_pro_builds(
             continue;
         };
         match validate(&details, &candidate, hero_id, patch_id) {
-            Ok((build, ability_upgrades)) => result.wins.push(ProWin {
+            Ok((build, ability_upgrades, stats)) => result.wins.push(ProWin {
                 hero_match: candidate,
                 build,
                 ability_upgrades,
+                stats,
             }),
             Err(reason) => discard(&mut result, reason),
         }
@@ -200,14 +203,14 @@ pub async fn load_pro_builds(
     result
 }
 
-/// Confere uma partida e devolve a build e a ordem de habilidades do
-/// jogador com o herói, quando é uma vitória de liga no patch.
+/// Confere uma partida e devolve a build, a ordem de habilidades e os totais
+/// finais do jogador com o herói, quando é uma vitória de liga no patch.
 fn validate(
     details: &MatchDetails,
     candidate: &HeroMatch,
     hero_id: u32,
     patch_id: u32,
-) -> Result<(PlayerBuild, Option<Vec<u32>>), DiscardReason> {
+) -> Result<(PlayerBuild, Option<Vec<u32>>, FinalStats), DiscardReason> {
     if !details.is_league_match() {
         return Err(DiscardReason::NotProfessional);
     }
@@ -226,7 +229,7 @@ fn validate(
         .build
         .clone()
         .ok_or(DiscardReason::MissingPlayerData)?;
-    Ok((build, player.ability_upgrades.clone()))
+    Ok((build, player.ability_upgrades.clone(), player.stats))
 }
 
 fn discard(result: &mut ProBuilds, reason: DiscardReason) {

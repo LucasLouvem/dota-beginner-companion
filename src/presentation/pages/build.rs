@@ -5,26 +5,28 @@
 //! seleção, e o progresso não refaz a lista.
 
 use crate::application::error::{Redactor, ToDiagnostic};
-use crate::application::state::{ModeState, RecommendationStatus};
+use crate::application::ports::PublicWin;
+use crate::application::state::RecommendationStatus;
 use crate::application::use_cases::fallback::DataOrigin;
-use crate::application::use_cases::pro_builds::PRO_WINS_SHOWN;
+use crate::application::use_cases::pro_builds::{PRO_WINS_SHOWN, ProWin};
+use crate::application::use_cases::recommendation_request::RecommendationKey;
 use crate::application::use_cases::recommendations::{
     BuildId, BuildSource, PUBLIC_WINS_SHOWN, Recommendations,
 };
 use crate::domain::ability_catalog::AbilityIdCatalog;
 use crate::domain::build_progress::{
-    ItemOrderEvidence, PurchaseWindow, StepState, ability_max_order, ability_progress,
-    build_item_order, held_items, item_progress, points_spent, purchases_by_window, starting_items,
+    ItemOrderEvidence, StepState, ability_progress, build_item_order, held_items, item_progress,
+    points_spent, starting_items,
 };
-use crate::domain::builds::Purchase;
 use crate::domain::game::{GameMode, GameSnapshot};
 use crate::domain::hero_catalog::HeroCatalog;
 use crate::domain::item_catalog::ItemCatalog;
-use crate::domain::match_data::PopularityPhase;
+use crate::domain::match_data::Kda;
 use crate::presentation::i18n::{translate, translate_with};
 use crate::presentation::widgets::{Level, RowContent, format_date, format_duration, format_time};
 
-use super::hero::{mode_label, stat_lines};
+use super::build_compare::{Comparison, comparison};
+use super::hero::mode_label;
 
 /// Catálogos usados pelos nomes de heróis, itens e habilidades.
 pub struct BuildCatalogs<'a> {
@@ -33,36 +35,49 @@ pub struct BuildCatalogs<'a> {
     pub abilities: &'a AbilityIdCatalog,
 }
 
-/// Linhas do cabeçalho: herói, modo e patch, contagem de vitórias, origem e
-/// idade dos dados, avisos do modo e falhas das fontes. Não depende da build
+/// Cabeçalho da página: o título em destaque, detalhes secundários (fonte,
+/// contagem e horário da consulta) e os avisos. Não depende da build
 /// escolhida.
-pub fn header_rows(
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeaderContent {
+    pub title: String,
+    pub details: String,
+    /// Avisos e falhas: poucas vitórias, dados antigos, modo e erros.
+    pub notices: Vec<RowContent>,
+}
+
+pub fn header_content(
     status: &RecommendationStatus,
-    mode: &ModeState,
     heroes: &HeroCatalog,
     redactor: &Redactor,
-) -> Vec<RowContent> {
+) -> HeaderContent {
     let RecommendationStatus::Ready(recommendations) = status else {
-        return status_rows(status, heroes, redactor).unwrap_or_default();
+        return HeaderContent {
+            title: translate("Build"),
+            details: String::new(),
+            notices: status_rows(status, heroes, redactor).unwrap_or_default(),
+        };
     };
     let pro = &recommendations.pro;
-    let mut rows = vec![ready_header(recommendations, heroes)];
-    rows.push(RowContent::new(
-        Level::Info,
-        &translate_with(
-            "{} vitórias profissionais · {} vitórias públicas",
+    let summary = ready_header(recommendations, heroes);
+    let details = [
+        translate_with(
+            "{} vitórias profissionais e {} públicas",
             &[
                 &pro.wins.len().to_string(),
                 &recommendations.public_wins.len().to_string(),
             ],
         ),
-        &translate_with(
-            "Fonte: OpenDota, patch {}. {} partidas de liga recentes examinadas; as públicas vêm da coleta em segundo plano.",
-            &[&recommendations.patch.name, &pro.examined.to_string()],
+        translate_with(
+            "fonte: OpenDota, {} partidas de liga recentes examinadas",
+            &[&pro.examined.to_string()],
         ),
-    ));
+        summary.subtitle.clone(),
+    ]
+    .join(" · ");
+    let mut notices = Vec::new();
     if pro.wins.len() < PRO_WINS_SHOWN || recommendations.public_wins.len() < PUBLIC_WINS_SHOWN {
-        rows.push(RowContent::new(
+        notices.push(RowContent::new(
             Level::Info,
             &translate("Poucas vitórias encontradas"),
             &translate_with(
@@ -76,7 +91,7 @@ pub fn header_rows(
             .candidates_fetched_at
             .map(|fetched_at| translate_with(" de {}", &[&format_time(fetched_at)]))
             .unwrap_or_default();
-        rows.push(RowContent::new(
+        notices.push(RowContent::new(
             Level::Warning,
             &translate_with("Dados profissionais antigos{}", &[&since]),
             &translate(
@@ -84,38 +99,28 @@ pub fn header_rows(
             ),
         ));
     }
-    rows.extend(mode_notes(recommendations.key.mode, mode));
+    notices.extend(mode_notes(recommendations.key.mode));
     if let Some(error) = &pro.error {
-        rows.push(RowContent::diagnostic(&error.to_diagnostic(redactor)));
+        notices.push(RowContent::diagnostic(&error.to_diagnostic(redactor)));
     }
     if let Some(error) = &recommendations.public_error {
-        rows.push(RowContent::diagnostic(&error.to_diagnostic(redactor)));
+        notices.push(RowContent::diagnostic(&error.to_diagnostic(redactor)));
     }
-    rows
+    HeaderContent {
+        title: summary.title,
+        details,
+        notices,
+    }
 }
 
-/// Avisos do modo: modo ainda não informado, Turbo (vitórias profissionais
-/// não são de Turbo) e Contra bots (dados de Escolha Livre).
-fn mode_notes(mode: GameMode, state: &ModeState) -> Vec<RowContent> {
-    let mut notes = Vec::new();
-    if !matches!(state, ModeState::Confirmed { .. }) {
-        notes.push(RowContent::new(
-            Level::Info,
-            &translate_with(
-                "Modo ainda não informado; mostrando dados de {}",
-                &[&mode_label(mode)],
-            ),
-            &translate("O modo é perguntado quando a partida é encontrada e pode ser alterado logo abaixo."),
-        ));
-    }
+/// Avisos do modo: Contra bots (dados de Escolha Livre). O aviso de Turbo é
+/// da build profissional escolhida, não da página, e o modo ainda não
+/// informado aparece no card do modo.
+fn mode_notes(mode: GameMode) -> Vec<RowContent> {
     match mode {
-        GameMode::Turbo => notes.push(turbo_warning(&translate(
-            "As vitórias públicas são de Turbo; as profissionais são partidas normais, com outro ritmo.",
-        ))),
-        GameMode::Bots => notes.push(bots_note()),
-        GameMode::AllPick => {}
+        GameMode::Bots => vec![bots_note()],
+        GameMode::AllPick | GameMode::Turbo => Vec::new(),
     }
-    notes
 }
 
 /// Uma vitória na lista lateral.
@@ -124,8 +129,25 @@ pub struct BuildEntry {
     pub id: BuildId,
     pub title: String,
     pub subtitle: String,
-    /// Itens finais (inventário), para as miniaturas.
-    pub items: Vec<ItemChip>,
+    /// Abates, mortes e assistências do jogador nesta vitória.
+    pub kda: Option<Kda>,
+}
+
+/// K/D/A curto, como "3/8/16".
+pub fn kda_text(kda: Kda) -> String {
+    format!("{}/{}/{}", kda.kills, kda.deaths, kda.assists)
+}
+
+/// K/D/A por extenso, para o leitor de tela.
+pub fn kda_label(kda: Kda) -> String {
+    translate_with(
+        "abates {}, mortes {}, assistências {}",
+        &[
+            &kda.kills.to_string(),
+            &kda.deaths.to_string(),
+            &kda.assists.to_string(),
+        ],
+    )
 }
 
 /// Lista lateral: as vitórias profissionais e as públicas, na ordem das
@@ -145,7 +167,7 @@ impl Sidebar {
     }
 }
 
-pub fn sidebar(status: &RecommendationStatus, items: &ItemCatalog) -> Sidebar {
+pub fn sidebar(status: &RecommendationStatus) -> Sidebar {
     let RecommendationStatus::Ready(recommendations) = status else {
         return Sidebar {
             empty: Some(RowContent::new(
@@ -158,49 +180,11 @@ pub fn sidebar(status: &RecommendationStatus, items: &ItemCatalog) -> Sidebar {
             ..Sidebar::default()
         };
     };
-    let pro: Vec<BuildEntry> = recommendations
-        .pro
-        .wins
-        .iter()
-        .map(|win| {
-            let recent = &win.hero_match;
-            let mut details = Vec::new();
-            if let Some(start_time) = recent.start_time {
-                details.push(format_date(start_time));
-            }
-            if let Some(duration) = recent.duration_secs {
-                details.push(format_duration(duration));
-            }
-            BuildEntry {
-                id: BuildId {
-                    source: BuildSource::Pro,
-                    match_id: recent.match_id,
-                },
-                title: recent
-                    .league_name
-                    .clone()
-                    .unwrap_or_else(|| translate("Liga sem nome")),
-                subtitle: details.join(" · "),
-                items: plain_chips(&win.build.inventory, items),
-            }
-        })
-        .collect();
+    let pro: Vec<BuildEntry> = recommendations.pro.wins.iter().map(pro_entry).collect();
     let public: Vec<BuildEntry> = recommendations
         .public_wins
         .iter()
-        .map(|win| BuildEntry {
-            id: BuildId {
-                source: BuildSource::Public,
-                match_id: win.match_id,
-            },
-            title: win
-                .avg_rank_tier
-                .and_then(rank_label)
-                .map(|rank| translate_with("Partida pública · {}", &[&rank]))
-                .unwrap_or_else(|| translate("Partida pública")),
-            subtitle: win.start_time.map(format_date).unwrap_or_default(),
-            items: plain_chips(&win.build.inventory, items),
-        })
+        .map(public_entry)
         .collect();
     let empty = (pro.is_empty() && public.is_empty()).then(|| {
         RowContent::new(
@@ -213,6 +197,70 @@ pub fn sidebar(status: &RecommendationStatus, items: &ItemCatalog) -> Sidebar {
         )
     });
     Sidebar { pro, public, empty }
+}
+
+/// Entrada de uma vitória profissional: a liga, a data e a duração.
+fn pro_entry(win: &ProWin) -> BuildEntry {
+    let recent = &win.hero_match;
+    let mut details = Vec::new();
+    if let Some(start_time) = recent.start_time {
+        details.push(format_date(start_time));
+    }
+    if let Some(duration) = recent.duration_secs {
+        details.push(format_duration(duration));
+    }
+    BuildEntry {
+        id: BuildId {
+            source: BuildSource::Pro,
+            match_id: recent.match_id,
+        },
+        title: recent
+            .league_name
+            .clone()
+            .unwrap_or_else(|| translate("Liga sem nome")),
+        subtitle: details.join(" · "),
+        kda: recent.kda,
+    }
+}
+
+/// Entrada de uma vitória pública: o rank médio, no título (a lista já está
+/// no grupo de vitórias públicas), e a data.
+fn public_entry(win: &PublicWin) -> BuildEntry {
+    BuildEntry {
+        id: BuildId {
+            source: BuildSource::Public,
+            match_id: win.match_id,
+        },
+        title: win
+            .avg_rank_tier
+            .and_then(rank_label)
+            .map(|rank| translate_with("Rank médio {}", &[&rank]))
+            .unwrap_or_else(|| translate("Rank médio não informado")),
+        subtitle: win.start_time.map(format_date).unwrap_or_default(),
+        kda: win.kda,
+    }
+}
+
+/// Build a mostrar depois de novas recomendações: a escolhida antes, se a
+/// consulta é a mesma e ela ainda está na lista; senão, a primeira da lista.
+/// `None` sem builds.
+pub fn select_build(
+    previous: Option<&(RecommendationKey, BuildId)>,
+    key: &RecommendationKey,
+    items: &[SidebarItem],
+) -> Option<BuildId> {
+    let kept = previous
+        .filter(|(previous_key, id)| previous_key == key && index_of(items, id).is_some())
+        .map(|(_, id)| *id);
+    kept.or_else(|| first_entry(items))
+}
+
+/// Primeira build da lista, se houver.
+pub fn first_entry(items: &[SidebarItem]) -> Option<BuildId> {
+    items.iter().find_map(|item| match item {
+        SidebarItem::Entry(entry) => Some(entry.id),
+        _ => None,
+    })
 }
 
 /// Uma linha da lista lateral: título de grupo, vitória ou explicação de
@@ -295,19 +343,6 @@ impl ItemChip {
     }
 }
 
-/// Itens sem minuto nem situação, só com o nome de exibição.
-pub fn plain_chips(names: &[String], items: &ItemCatalog) -> Vec<ItemChip> {
-    names
-        .iter()
-        .map(|item| ItemChip {
-            item: item.clone(),
-            label: items.display_name(item).to_owned(),
-            time: None,
-            state: None,
-        })
-        .collect()
-}
-
 pub fn step_label(state: StepState) -> String {
     match state {
         StepState::Done => translate("já feito"),
@@ -321,10 +356,11 @@ pub fn step_label(state: StepState) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AbilityGrid {
     pub rows: Vec<String>,
+    /// Nome interno da habilidade de cada linha, que identifica a imagem;
+    /// `None` nos talentos e nas habilidades que o catálogo não conhece.
+    pub images: Vec<Option<String>>,
     /// Para cada ponto, a linha da habilidade e a situação.
     pub points: Vec<(usize, StepState)>,
-    /// Ordem em que cada habilidade recebeu o último ponto.
-    pub max_order: String,
     /// Ordem completa em texto, para o leitor de tela.
     pub summary: String,
 }
@@ -338,11 +374,13 @@ pub struct BuildDetail {
     pub finals: Vec<ItemChip>,
     pub backpack: Vec<ItemChip>,
     pub neutral: Vec<ItemChip>,
-    /// Todas as compras por janela de tempo.
-    pub windows: Vec<(String, Vec<ItemChip>)>,
+    /// Aprimoramento do item neutro.
+    pub enhancement: Vec<ItemChip>,
     pub abilities: Option<AbilityGrid>,
     /// Explicação quando não há ordem de habilidades.
     pub abilities_note: Option<RowContent>,
+    /// Você × build; só as vitórias profissionais têm os totais finais.
+    pub comparison: Option<Comparison>,
 }
 
 /// Conteúdo da build `id` acompanhado pelo estado `game`; `None` quando a
@@ -361,12 +399,10 @@ pub fn build_detail(
         time: None,
         state: None,
     };
-    let bought = |purchase: &Purchase| ItemChip {
-        time: Some(purchase.time),
-        ..chip(&purchase.item)
-    };
 
     let mut notes = Vec::new();
+    // Só a build profissional escolhida em Turbo recebe o aviso: as públicas
+    // dessa lista são de Turbo de verdade.
     if id.source == BuildSource::Pro && recommendations.key.mode == GameMode::Turbo {
         notes.push(turbo_warning(&translate(
             "Esta vitória é de uma partida normal: os minutos de compra não valem para o ritmo do Turbo.",
@@ -389,17 +425,12 @@ pub fn build_detail(
         })
         .collect();
 
-    let neutral = build
-        .neutral
+    let neutral = build.neutral.iter().map(|item| chip(item)).collect();
+    let enhancement = build
+        .neutral_enhancement
         .iter()
-        .chain(&build.neutral_enhancement)
         .map(|item| chip(item))
         .collect();
-    let windows = purchases_by_window(build)
-        .into_iter()
-        .map(|(window, purchases)| (window_label(window), purchases.iter().map(bought).collect()))
-        .collect();
-
     let (abilities, abilities_note) = match recommendations.ability_upgrades(id) {
         Some(upgrades) if !upgrades.is_empty() => (
             Some(ability_grid(
@@ -428,14 +459,21 @@ pub fn build_detail(
 
     Some(BuildDetail {
         notes,
-        starting: starting_items(build).iter().map(bought).collect(),
+        // O título do card já diz que são os itens de antes do início.
+        starting: starting_items(build)
+            .iter()
+            .map(|purchase| chip(&purchase.item))
+            .collect(),
         order: order_chips,
         finals: build.inventory.iter().map(|item| chip(item)).collect(),
         backpack: build.backpack.iter().map(|item| chip(item)).collect(),
         neutral,
-        windows,
+        enhancement,
         abilities,
         abilities_note,
+        comparison: recommendations
+            .pro_stats(id)
+            .and_then(|(stats, duration)| comparison(stats, duration, game)),
     })
 }
 
@@ -453,23 +491,25 @@ pub fn ability_grid(
             ability_name(id, catalogs.heroes, catalogs.abilities)
         }
     };
+    let image_of = |id: u32| {
+        (!catalogs.abilities.is_talent(id))
+            .then(|| catalogs.abilities.name(id).map(str::to_owned))
+            .flatten()
+    };
     let mut rows: Vec<String> = Vec::new();
+    let mut images: Vec<Option<String>> = Vec::new();
     let points = ability_progress(upgrades, spent)
         .into_iter()
         .map(|(id, state)| {
             let name = name_of(id);
             let row = rows.iter().position(|row| *row == name).unwrap_or_else(|| {
                 rows.push(name);
+                images.push(image_of(id));
                 rows.len() - 1
             });
             (row, state)
         })
         .collect();
-    let max_order = ability_max_order(upgrades, |id| catalogs.abilities.is_talent(id))
-        .into_iter()
-        .map(name_of)
-        .collect::<Vec<_>>()
-        .join(" > ");
     let summary = upgrades
         .iter()
         .enumerate()
@@ -480,40 +520,11 @@ pub fn ability_grid(
         .join("; ");
     AbilityGrid {
         rows,
+        images,
         points,
-        max_order,
         summary,
     }
 }
-
-pub fn window_label(window: PurchaseWindow) -> String {
-    match window {
-        PurchaseWindow::BeforeStart => translate("Antes do início"),
-        PurchaseWindow::Early => translate("Até 10 minutos"),
-        PurchaseWindow::Mid => translate("De 10 a 25 minutos"),
-        PurchaseWindow::Late => translate("Depois de 25 minutos"),
-    }
-}
-
-/// Faixa curta com o progresso da partida atual (nível, abates e ouro), sem
-/// a linha do tempo, que fica mais abaixo.
-pub fn progress_row(game: Option<&GameSnapshot>) -> RowContent {
-    match game {
-        Some(game) if game.hero_level.is_some() => RowContent::new(
-            Level::Info,
-            &translate("Partida atual"),
-            &stat_lines(&game.stats, game.hero_level).join(" · "),
-        ),
-        _ => RowContent::new(
-            Level::Info,
-            &translate("Partida atual"),
-            &translate("O progresso aparece quando o Dota envia os dados do herói."),
-        ),
-    }
-}
-
-/// Itens mostrados por fase na popularidade.
-const POPULAR_ITEMS_SHOWN: usize = 5;
 
 /// Nome de exibição do herói, ou o ID quando o catálogo não o conhece.
 pub fn hero_name(heroes: &HeroCatalog, hero_id: u32) -> String {
@@ -579,7 +590,7 @@ pub fn ready_header(recommendations: &Recommendations, heroes: &HeroCatalog) -> 
     )
 }
 
-/// Aviso das abas que usam partidas profissionais quando o modo é Turbo.
+/// Aviso da build profissional escolhida quando o modo é Turbo.
 pub fn turbo_warning(subtitle: &str) -> RowContent {
     RowContent::new(
         Level::Warning,
@@ -622,71 +633,6 @@ pub fn purchase_time(seconds: i32) -> String {
     match u32::try_from(seconds) {
         Ok(seconds) => format_duration(seconds),
         Err(_) => translate("antes do início"),
-    }
-}
-
-/// Linha da fonte, com o aviso de dados antigos ou ausentes.
-pub fn source_row(source: &str, origin: Option<DataOrigin>) -> RowContent {
-    let (level, freshness) = match origin {
-        Some(DataOrigin::Live | DataOrigin::Cached) => (Level::Info, translate("Dados atuais")),
-        Some(DataOrigin::Stale) => (
-            Level::Warning,
-            translate(
-                "Dados antigos: o OpenDota não respondeu, então aparece o que estava guardado.",
-            ),
-        ),
-        Some(DataOrigin::Embedded) | None => (Level::Warning, translate("Sem dados")),
-    };
-    RowContent::new(level, source, &freshness)
-}
-
-/// Itens mais comprados em cada fase, em partidas profissionais, com a
-/// fonte; mostra popularidade, não uma build.
-pub fn popularity_rows(
-    recommendations: &Recommendations,
-    items: &ItemCatalog,
-    redactor: &Redactor,
-) -> Vec<RowContent> {
-    let popularity = &recommendations.popularity;
-    let mut rows: Vec<RowContent> = popularity
-        .value
-        .iter()
-        .flat_map(|value| &value.phases)
-        .filter(|(_, counts)| !counts.is_empty())
-        .map(|(phase, counts)| {
-            let names: Vec<&str> = counts
-                .iter()
-                .take(POPULAR_ITEMS_SHOWN)
-                .map(|(item, _)| items.display_name(item))
-                .collect();
-            RowContent::new(
-                Level::Info,
-                &translate_with("{}: {}", &[&phase_label(*phase), &names.join(", ")]),
-                &translate("Popularidade em partidas profissionais, não taxa de vitória."),
-            )
-        })
-        .collect();
-    rows.push(source_row(
-        &translate_with(
-            "Fonte: OpenDota, popularidade em partidas profissionais · patch {}",
-            &[&recommendations.patch.name],
-        ),
-        popularity.origin,
-    ));
-    if popularity.value.is_none()
-        && let Some(error) = &popularity.error
-    {
-        rows.push(RowContent::diagnostic(&error.to_diagnostic(redactor)));
-    }
-    rows
-}
-
-pub fn phase_label(phase: PopularityPhase) -> String {
-    match phase {
-        PopularityPhase::Start => translate("Início"),
-        PopularityPhase::Early => translate("Até 10 minutos"),
-        PopularityPhase::Mid => translate("De 10 a 25 minutos"),
-        PopularityPhase::Late => translate("Depois de 25 minutos"),
     }
 }
 

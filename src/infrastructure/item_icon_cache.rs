@@ -29,16 +29,15 @@ impl ItemIconCache {
             .map(|project_dirs| project_dirs.cache_dir().join(ICONS_DIR))
     }
 
-    /// Arquivo do item. Só nomes internos simples (`item_` seguido de letras
-    /// minúsculas, números e `_`) viram caminho, para um nome inesperado
-    /// nunca sair da pasta.
+    /// Arquivo da imagem. Só nomes internos simples (letras minúsculas,
+    /// números e `_`, como `item_blink`, `npc_dota_hero_zuus` e
+    /// `zuus_arc_lightning`) viram caminho, para um nome inesperado nunca
+    /// sair da pasta.
     fn file_of(&self, item: &str) -> Result<PathBuf, ItemIconError> {
-        let valid = item.strip_prefix("item_").is_some_and(|name| {
-            !name.is_empty()
-                && name.chars().all(|character| {
-                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
-                })
-        });
+        let valid = !item.is_empty()
+            && item.chars().all(|character| {
+                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+            });
         if !valid {
             return Err(ItemIconError::UnexpectedPath { path: item.into() });
         }

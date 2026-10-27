@@ -22,6 +22,7 @@ fn at(seconds: u64) -> SystemTime {
 
 fn candidate(match_id: u64, league_id: Option<u32>) -> HeroMatch {
     HeroMatch {
+        kda: None,
         match_id,
         // Mais recente quanto maior o ID, para a ordem do teste ser clara.
         start_time: Some(1_792_000_000 + match_id as i64),
@@ -51,6 +52,8 @@ fn zeus_build() -> PlayerBuild {
 
 fn zeus(won: bool) -> MatchPlayer {
     MatchPlayer {
+        stats: Default::default(),
+        kda: None,
         hero_id: ZEUS,
         won: Some(won),
         patch_id: Some(PATCH),
@@ -125,6 +128,7 @@ fn match_ids(result: &ProBuilds) -> Vec<u64> {
 
 fn lost(match_id: u64) -> HeroMatch {
     HeroMatch {
+        kda: None,
         hero_won: Some(false),
         ..candidate(match_id, Some(100))
     }
@@ -157,6 +161,27 @@ async fn the_three_most_recent_wins_are_kept_with_build_and_abilities() {
 }
 
 #[tokio::test]
+async fn each_win_carries_the_final_totals_of_the_player() {
+    let setup = Setup::new(vec![candidate(1, Some(100))]);
+    let stats = FinalStats {
+        last_hits: Some(184),
+        gpm: Some(469),
+        ..FinalStats::default()
+    };
+    setup.details(details(
+        1,
+        MatchPlayer {
+            stats,
+            ..zeus(true)
+        },
+    ));
+
+    let result = setup.run().await;
+
+    assert_eq!(result.wins[0].stats, stats);
+}
+
+#[tokio::test]
 async fn losses_in_the_list_are_skipped_without_fetching_details() {
     let setup = Setup::new(vec![
         lost(4),
@@ -179,6 +204,7 @@ async fn losses_in_the_list_are_skipped_without_fetching_details() {
 #[tokio::test]
 async fn loss_known_only_in_the_details_is_discarded() {
     let setup = Setup::new(vec![HeroMatch {
+        kda: None,
         hero_won: None,
         ..candidate(1, Some(100))
     }]);
@@ -202,6 +228,8 @@ async fn win_of_a_match_not_analyzed_keeps_only_the_inventory() {
         ..details(
             1,
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 build: Some(inventory_only.clone()),
                 ability_upgrades: None,
                 ..zeus(true)
@@ -239,6 +267,8 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
     setup.details(details(
         2,
         MatchPlayer {
+            stats: Default::default(),
+            kda: None,
             patch_id: Some(59),
             ..zeus(true)
         },
@@ -248,6 +278,8 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
         ..details(
             3,
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 patch_id: None,
                 ..zeus(true)
             },
@@ -256,6 +288,8 @@ async fn each_invalid_match_is_discarded_with_its_reason() {
     setup.details(details(
         4,
         MatchPlayer {
+            stats: Default::default(),
+            kda: None,
             build: None,
             ..zeus(true)
         },
@@ -309,6 +343,8 @@ async fn stops_at_forty_calls_counting_the_list() {
         setup.details(details(
             id,
             MatchPlayer {
+                stats: Default::default(),
+                kda: None,
                 patch_id: Some(59),
                 ..zeus(true)
             },

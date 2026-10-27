@@ -25,9 +25,13 @@ impl DotaLocator for SingleInstallLocator {
     }
 }
 
+/// Sonda fixa: o booleano vale para o Dota; a Steam está aberta quando o Dota está.
 struct FixedProcessProbe(bool);
 impl ProcessProbe for FixedProcessProbe {
     fn dota_running(&self) -> bool {
+        self.0
+    }
+    fn steam_running(&self) -> bool {
         self.0
     }
 }
@@ -87,6 +91,7 @@ fn reports_matching_config_and_running_dota() {
     );
     assert!(matches!(report.installs[0].config, GsiConfigState::Matches));
     assert!(report.dota_process_running);
+    assert!(report.steam_process_running);
 }
 
 #[test]

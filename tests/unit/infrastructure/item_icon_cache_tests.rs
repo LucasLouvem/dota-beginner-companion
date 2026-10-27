@@ -27,7 +27,14 @@ fn unexpected_item_names_never_become_paths() {
     let temp_dir = tempfile::tempdir().unwrap();
     let cache = ItemIconCache::new(temp_dir.path().to_path_buf());
 
-    for item in ["../item_blink", "item_", "blink", "item_Blink", "item_a/b"] {
+    for item in [
+        "../item_blink",
+        "",
+        "Blink",
+        "item_Blink",
+        "item_a/b",
+        "zuus.png",
+    ] {
         assert!(
             matches!(cache.load(item), Err(ItemIconError::UnexpectedPath { .. })),
             "{item}"
@@ -56,4 +63,14 @@ fn save_in_a_read_only_folder_is_a_cache_error_without_partial_file() {
         "{result:?}"
     );
     assert_eq!(fs::read_dir(&locked).unwrap().count(), 0);
+}
+
+#[test]
+fn heroes_and_abilities_are_cached_by_their_internal_names() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let cache = ItemIconCache::new(temp_dir.path().join("item-icons"));
+    for name in ["npc_dota_hero_zuus", "zuus_arc_lightning"] {
+        cache.save(name, b"png").unwrap();
+        assert_eq!(cache.load(name).unwrap(), Some(b"png".to_vec()));
+    }
 }

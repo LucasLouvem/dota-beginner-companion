@@ -26,7 +26,7 @@ use super::use_cases::current_patch::load_current_patch;
 use super::use_cases::external_sources::ExternalSources;
 use super::use_cases::install_gsi_config::install_gsi_config;
 use super::use_cases::item_icons::{
-    IconBytes, IconSources, carried_items, load_icons, status_items,
+    IconBytes, IconSources, carried_items, load_icons, status_hero_images, status_items,
 };
 use super::use_cases::recommendation_request::{RequestTicket, RequestTracker};
 use super::use_cases::recommendations::{Recommendations, desired_key, load_recommendations};
@@ -117,8 +117,9 @@ impl IconRuntime {
         }
     }
 
-    /// Pede as imagens novas: as do inventário atual e, quando as
-    /// recomendações mudaram, as das builds.
+    /// Pede as imagens novas: as do inventário atual, as dos heróis e das
+    /// habilidades que a página mostra e, quando as recomendações mudaram, as
+    /// dos itens das builds.
     fn refresh(&mut self, snapshot: &AppSnapshot) {
         let mut wanted: BTreeSet<String> = snapshot
             .match_status
@@ -126,6 +127,7 @@ impl IconRuntime {
             .as_ref()
             .map(carried_items)
             .unwrap_or_default();
+        wanted.extend(status_hero_images(snapshot, &self.sources.heroes));
         if let RecommendationStatus::Ready(recommendations) = &snapshot.recommendations {
             let changed = !self
                 .seen_recommendations

@@ -1,41 +1,40 @@
-//! Tela "Diagnóstico": mostra o que foi detectado e o que falta para o GSI
-//! funcionar. Só exibe o estado e envia comandos ao núcleo.
+//! Tela "Diagnóstico": a saúde do aplicativo em cards (Steam, Dota 2,
+//! servidor GSI, configuração GSI e recebimento de dados), com o estado
+//! geral no alto, as ações explicadas e, num bloco secundário e fechado, os
+//! detalhes técnicos. Só exibe o estado e envia comandos ao núcleo; o texto e
+//! as regras de cada estado ficam em `diagnostics_health`.
 
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::application::diagnostics::{DiagnosticReport, GsiConfigState, InstallCheck};
-use crate::application::error::{Diagnostic, Redactor, ToDiagnostic, log_error};
-use crate::application::event_bus::{CoreConnectionError, RejectReason, UiCommand};
-use crate::application::state::{
-    AppSnapshot, ConnectionTest, GsiLogStatus, InstallOutcome, ReceivedEvent, ServerState,
-};
-use crate::presentation::i18n::{translate, translate_with};
-use crate::presentation::widgets::{
-    Level, RowContent, RowSection, boxed_list, format_time, section_title, status_row,
-};
+use crate::application::error::{ToDiagnostic, log_error};
+use crate::application::event_bus::{CoreConnectionError, UiCommand};
+use crate::application::state::{AppSnapshot, InstallOutcome};
+use crate::presentation::card_grid::{CardGrid, Columns, Layout};
+use crate::presentation::i18n::translate;
+use crate::presentation::widgets::{Level, RowContent, RowSection, boxed_list};
 
+use super::diagnostics_health::{
+    HealthCard, HealthContent, OverallState, TechnicalDetails, first_library, health_content,
+    latest_event,
+};
 use super::send_command;
 
-/// Sem evento do Dota há mais tempo que isso (heartbeat é 30 s), não
-/// consideramos a conexão ativa.
-const RECENT_EVENT_SECS: u64 = 90;
-
-/// Conteúdo da página que muda com o estado, na ordem exibida.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiagnosticsContent {
-    /// O botão de instalar só fica ativo com uma instalação do Dota encontrada.
-    pub can_install: bool,
-    pub config_subtitle: String,
-    pub dota: Vec<RowContent>,
-    pub server: Vec<RowContent>,
-    /// Origem e horário do último JSON recebido.
-    pub json_source: String,
-}
+/// Espaço entre os cards, em pixels.
+const GAP: i32 = 8;
+/// Margem interna dos cards.
+const CARD_PADDING: i32 = 12;
+/// Até esta largura, a grade passa de três para duas colunas.
+const MEDIUM_LAYOUT: &str = "max-width: 1100sp";
+/// A janela não encolhe abaixo disto (ver `MIN_WINDOW_WIDTH`).
+const MIN_PAGE_WIDTH: i32 = 700;
+const CARD_COLUMNS: Columns = Columns::new(3, 2);
 
 /// Página Diagnóstico.
 pub struct DiagnosticsPage {
@@ -60,14 +59,282 @@ pub enum DiagnosticsMessage {
     ConfirmOverwrite,
 }
 
-/// Widgets da página Diagnóstico, com o que cada lista mostra agora.
-pub struct DiagnosticsWidgets {
-    install_button: gtk::Button,
-    dota: RowSection,
-    server: RowSection,
-    config_row: adw::ActionRow,
+/// Ícone do estado, além do texto e da cor.
+fn level_icon(level: Level) -> &'static str {
+    match level {
+        Level::Ok => "emblem-ok-symbolic",
+        Level::Warning => "dialog-warning-symbolic",
+        Level::Error => "dialog-error-symbolic",
+        Level::Info => "dialog-information-symbolic",
+    }
+}
+
+fn level_class(level: Level) -> &'static str {
+    match level {
+        Level::Ok => "success",
+        Level::Warning => "warning",
+        Level::Error => "error",
+        Level::Info => "dim-label",
+    }
+}
+
+/// Troca o estilo de estado de um widget só quando o nível mudou.
+fn set_level(widget: &impl IsA<gtk::Widget>, shown: Option<Level>, level: Level) {
+    if shown == Some(level) {
+        return;
+    }
+    if let Some(previous) = shown {
+        widget.remove_css_class(level_class(previous));
+    }
+    widget.add_css_class(level_class(level));
+}
+
+fn set_label(label: &gtk::Label, text: &str) {
+    if label.label() != text {
+        label.set_label(text);
+    }
+}
+
+/// Card de um item da saúde: ícone, título, estado e uma explicação curta.
+struct HealthCardWidget {
+    root: gtk::Box,
+    icon: gtk::Image,
+    title: gtk::Label,
+    state: gtk::Label,
+    description: gtk::Label,
+    shown: Option<HealthCard>,
+}
+
+impl HealthCardWidget {
+    fn new() -> Self {
+        let icon = gtk::Image::new();
+        let title = gtk::Label::builder().xalign(0.0).hexpand(true).build();
+        title.add_css_class("heading");
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        top.append(&icon);
+        top.append(&title);
+        let state = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        state.add_css_class("title-4");
+        let description = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        description.add_css_class("dim-label");
+        description.add_css_class("caption");
+        let inner = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        inner.set_margin_top(CARD_PADDING);
+        inner.set_margin_bottom(CARD_PADDING);
+        inner.set_margin_start(CARD_PADDING);
+        inner.set_margin_end(CARD_PADDING);
+        inner.append(&top);
+        inner.append(&state);
+        inner.append(&description);
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .accessible_role(gtk::AccessibleRole::Group)
+            .hexpand(true)
+            .build();
+        root.add_css_class("dota-card");
+        root.append(&inner);
+        Self {
+            root,
+            icon,
+            title,
+            state,
+            description,
+            shown: None,
+        }
+    }
+
+    /// Atualiza só o que mudou.
+    fn show(&mut self, card: &HealthCard) {
+        if self.shown.as_ref() == Some(card) {
+            return;
+        }
+        let previous = self.shown.as_ref().map(|shown| shown.level);
+        if previous != Some(card.level) {
+            self.icon.set_icon_name(Some(level_icon(card.level)));
+        }
+        set_level(&self.icon, previous, card.level);
+        set_level(&self.state, previous, card.level);
+        set_label(&self.title, &card.title);
+        set_label(&self.state, &card.state);
+        set_label(&self.description, &card.description);
+        self.root
+            .update_property(&[gtk::accessible::Property::Label(&format!(
+                "{}: {}",
+                card.title, card.state
+            ))]);
+        self.shown = Some(card.clone());
+    }
+}
+
+/// Estado geral, no alto da tela.
+struct OverallWidget {
+    root: gtk::Box,
+    icon: gtk::Image,
+    title: gtk::Label,
+    description: gtk::Label,
+    shown: Option<OverallState>,
+}
+
+impl OverallWidget {
+    fn new() -> Self {
+        let icon = gtk::Image::builder().pixel_size(32).build();
+        let title = gtk::Label::builder().xalign(0.0).build();
+        title.add_css_class("title-2");
+        title.set_accessible_role(gtk::AccessibleRole::Heading);
+        let description = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        description.add_css_class("dim-label");
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        text.append(&title);
+        text.append(&description);
+        let inner = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        inner.set_margin_top(CARD_PADDING);
+        inner.set_margin_bottom(CARD_PADDING);
+        inner.set_margin_start(CARD_PADDING);
+        inner.set_margin_end(CARD_PADDING);
+        inner.append(&icon);
+        inner.append(&text);
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .accessible_role(gtk::AccessibleRole::Group)
+            .build();
+        root.add_css_class("dota-card");
+        root.update_property(&[gtk::accessible::Property::Label(&translate("Estado geral"))]);
+        root.append(&inner);
+        Self {
+            root,
+            icon,
+            title,
+            description,
+            shown: None,
+        }
+    }
+
+    fn show(&mut self, overall: OverallState) {
+        if self.shown == Some(overall) {
+            return;
+        }
+        let previous = self.shown.map(OverallState::level);
+        self.icon.set_icon_name(Some(level_icon(overall.level())));
+        set_level(&self.icon, previous, overall.level());
+        set_level(&self.title, previous, overall.level());
+        set_label(&self.title, &overall.title());
+        set_label(&self.description, &overall.description());
+        self.shown = Some(overall);
+    }
+}
+
+/// Bloco "Detalhes técnicos", fechado por padrão.
+struct DetailsWidget {
+    received: gtk::Label,
+    recorded: gtk::Label,
+    rejected: gtk::Label,
+    log: RowSection,
+    log_list: gtk::ListBox,
+    config_path: gtk::Label,
     json_source: gtk::Label,
     json_buffer: gtk::TextBuffer,
+}
+
+impl DetailsWidget {
+    fn new() -> (Self, gtk::Expander) {
+        let small = || {
+            let label = gtk::Label::builder()
+                .xalign(0.0)
+                .wrap(true)
+                .selectable(true)
+                .build();
+            label.add_css_class("dim-label");
+            label.add_css_class("caption");
+            label
+        };
+        let (received, recorded, rejected, config_path, json_source) =
+            (small(), small(), small(), small(), small());
+        let log_list = boxed_list();
+        let json_view = gtk::TextView::builder()
+            .editable(false)
+            .monospace(true)
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(8)
+            .bottom_margin(8)
+            .left_margin(8)
+            .right_margin(8)
+            .build();
+        let json_buffer = json_view.buffer();
+        let json_scroll = gtk::ScrolledWindow::builder()
+            .min_content_height(200)
+            .child(&json_view)
+            .build();
+        json_scroll.add_css_class("card");
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        for widget in [
+            received.upcast_ref::<gtk::Widget>(),
+            recorded.upcast_ref(),
+            rejected.upcast_ref(),
+            log_list.upcast_ref(),
+            config_path.upcast_ref(),
+            json_source.upcast_ref(),
+            json_scroll.upcast_ref(),
+        ] {
+            body.append(widget);
+        }
+        let expander = gtk::Expander::new(Some(&translate("Detalhes técnicos")));
+        expander.set_child(Some(&body));
+        (
+            Self {
+                received,
+                recorded,
+                rejected,
+                log: RowSection::new(log_list.clone()),
+                log_list,
+                config_path,
+                json_source,
+                json_buffer,
+            },
+            expander,
+        )
+    }
+
+    fn show(&mut self, details: &TechnicalDetails) {
+        set_label(&self.received, &details.received);
+        let optional = |label: &gtk::Label, text: &Option<String>| {
+            set_label(label, text.as_deref().unwrap_or(""));
+            label.set_visible(text.is_some());
+        };
+        optional(&self.recorded, &details.recorded);
+        optional(&self.rejected, &details.rejected);
+        self.log.show(details.log.iter().cloned().collect());
+        self.log_list.set_visible(details.log.is_some());
+        set_label(&self.config_path, &details.config_path);
+        set_label(&self.json_source, &details.json_source);
+    }
+}
+
+/// Widgets da página Diagnóstico.
+pub struct DiagnosticsWidgets {
+    overall: OverallWidget,
+    cards: Vec<HealthCardWidget>,
+    install_button: gtk::Button,
+    results: RowSection,
+    results_list: gtk::ListBox,
+    details: DetailsWidget,
+}
+
+/// Botão com um texto que explica o resultado esperado.
+fn action(button: &gtk::Button, hint: &str) -> gtk::Box {
+    let caption = gtk::Label::builder()
+        .label(hint)
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(34)
+        .build();
+    caption.add_css_class("dim-label");
+    caption.add_css_class("caption");
+    button.set_halign(gtk::Align::Start);
+    button.update_property(&[gtk::accessible::Property::Description(hint)]);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    column.append(button);
+    column.append(&caption);
+    column
 }
 
 impl Component for DiagnosticsPage {
@@ -90,31 +357,38 @@ impl Component for DiagnosticsPage {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        content.set_margin_top(24);
-        content.set_margin_bottom(24);
-        content.set_margin_start(16);
-        content.set_margin_end(16);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, GAP);
+        content.set_margin_top(12);
+        content.set_margin_bottom(12);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
 
+        // Cabeçalho: título, explicação e o estado geral.
         let title = gtk::Label::new(Some(&translate("Diagnóstico")));
         title.add_css_class("title-1");
         title.set_xalign(0.0);
+        title.set_accessible_role(gtk::AccessibleRole::Heading);
         let intro = gtk::Label::new(Some(&translate(
-            "Verifica se o Dota 2 foi encontrado, se o arquivo do Game State Integration (GSI) \
-             está instalado e se o aplicativo está recebendo dados. Nada aqui altera o jogo.",
+            "Verifica se o aplicativo está pronto para acompanhar o Dota 2. Nada aqui altera o jogo.",
         )));
         intro.set_wrap(true);
         intro.set_xalign(0.0);
         intro.add_css_class("dim-label");
+        let overall = OverallWidget::new();
         content.append(&title);
         content.append(&intro);
+        content.append(&overall.root);
 
-        let buttons = gtk::FlowBox::new();
-        buttons.set_selection_mode(gtk::SelectionMode::None);
-        buttons.set_column_spacing(8);
-        buttons.set_row_spacing(8);
-        buttons.set_max_children_per_line(3);
-        let run_button = gtk::Button::with_label(&translate("Executar diagnóstico"));
+        // Cards de saúde, em grade.
+        let grid = CardGrid::new(GAP, CARD_COLUMNS);
+        let cards: Vec<HealthCardWidget> = (0..5).map(|_| HealthCardWidget::new()).collect();
+        for card in &cards {
+            grid.push(&card.root, 1);
+        }
+        content.append(grid.widget());
+
+        // Ações, cada uma com a explicação do que faz.
+        let run_button = gtk::Button::with_label(&translate("Rodar diagnóstico novamente"));
         let test_button = gtk::Button::with_label(&translate("Testar conexão"));
         let install_button = gtk::Button::with_label(&translate("Instalar configuração GSI"));
         install_button.add_css_class("suggested-action");
@@ -128,73 +402,83 @@ impl Component for DiagnosticsPage {
             install_button
                 .connect_clicked(move |_| button_sender.input(DiagnosticsMessage::Install));
         }
-        for button in [&run_button, &test_button, &install_button] {
-            buttons.insert(button, -1);
+        let actions = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .homogeneous(false)
+            .max_children_per_line(3)
+            .row_spacing(GAP as u32)
+            .column_spacing(16)
+            .halign(gtk::Align::Start)
+            .build();
+        for (button, hint) in [
+            (
+                &install_button,
+                translate(
+                    "Cria ou atualiza o arquivo que faz o Dota enviar dados ao aplicativo. Reinicie o Dota depois.",
+                ),
+            ),
+            (
+                &test_button,
+                translate(
+                    "Envia um evento de teste ao servidor local. Não confirma que o Dota está enviando dados.",
+                ),
+            ),
+            (
+                &run_button,
+                translate("Refaz todas as verificações desta tela."),
+            ),
+        ] {
+            let child = gtk::FlowBoxChild::new();
+            child.set_focusable(false);
+            child.set_child(Some(&action(button, &hint)));
+            actions.append(&child);
         }
-        content.append(&buttons);
+        content.append(&actions);
 
-        let dota_list = boxed_list();
-        content.append(&section_title(&translate("Dota 2")));
-        content.append(&dota_list);
+        // Resultado das ações e falhas.
+        let results_list = boxed_list();
+        results_list.set_visible(false);
+        content.append(&results_list);
 
-        let server_list = boxed_list();
-        content.append(&section_title(&translate("Conexão GSI")));
-        content.append(&server_list);
-
-        let requirements = boxed_list();
-        requirements.append(&status_row(
-            Level::Info,
-            &translate("Opção de inicialização obrigatória"),
-            &translate(
-                "Na Steam: Dota 2 → Propriedades → Geral → Opções de inicialização → \
-                adicione -gamestateintegration. Sem ela o Dota não envia dados.",
-            ),
-        ));
-        requirements.append(&status_row(
-            Level::Info,
-            &translate("O que o GSI informa"),
-            &translate(
-                "Os dados recebidos incluem fase da partida, herói, itens, habilidades e \
-                estatísticas do próprio jogador. \
-                \"Partida encontrada\" não é informada diretamente pelo GSI. \
-                Nas partidas observadas, o menu também gerou eventos, sem o bloco map.",
-            ),
-        ));
-        let config_row = status_row(Level::Info, &translate("Configuração do aplicativo"), "");
-        requirements.append(&config_row);
-        content.append(&section_title(&translate("Requisitos e limitações")));
-        content.append(&requirements);
-
-        let json_source = gtk::Label::new(None);
-        json_source.set_xalign(0.0);
-        json_source.add_css_class("dim-label");
-        let json_view = gtk::TextView::builder()
-            .editable(false)
-            .monospace(true)
-            .wrap_mode(gtk::WrapMode::WordChar)
-            .top_margin(8)
-            .bottom_margin(8)
-            .left_margin(8)
-            .right_margin(8)
-            .build();
-        let json_buffer = json_view.buffer();
-        let json_scroll = gtk::ScrolledWindow::builder()
-            .min_content_height(260)
-            .child(&json_view)
-            .build();
-        json_scroll.add_css_class("card");
-        let json_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        json_box.append(&json_source);
-        json_box.append(&json_scroll);
-        let expander = gtk::Expander::new(Some(&translate("Último JSON recebido")));
-        expander.set_child(Some(&json_box));
+        // Detalhes técnicos, fechados.
+        let (details, expander) = DetailsWidget::new();
         content.append(&expander);
 
-        let clamp = adw::Clamp::builder()
-            .maximum_size(860)
+        // As cards mudam de colunas pelo sinal `apply` do ponto de quebra.
+        let bin = adw::BreakpointBin::builder()
+            .width_request(MIN_PAGE_WIDTH)
+            .height_request(200)
             .child(&content)
             .build();
-        root.set_child(Some(&clamp));
+        let medium = adw::Breakpoint::new(
+            adw::BreakpointCondition::parse(MEDIUM_LAYOUT)
+                .expect("a condição de largura é uma constante válida"),
+        );
+        let applied = Rc::new(Cell::new(false));
+        for medium_applied in [true, false] {
+            let (grid, applied) = (grid.clone(), Rc::clone(&applied));
+            let update = move |_: &adw::Breakpoint| {
+                applied.set(medium_applied);
+                grid.set_layout(if medium_applied {
+                    Layout::Medium
+                } else {
+                    Layout::Wide
+                });
+            };
+            if medium_applied {
+                medium.connect_apply(update);
+            } else {
+                medium.connect_unapply(update);
+            }
+        }
+        bin.add_breakpoint(medium);
+        // O `BreakpointBin` informa altura mínima zero; com a política padrão
+        // do `Viewport` (mínima), a página cortaria o conteúdo. A política
+        // natural a faz rolar.
+        let viewport = gtk::Viewport::new(gtk::Adjustment::NONE, gtk::Adjustment::NONE);
+        viewport.set_vscroll_policy(gtk::ScrollablePolicy::Natural);
+        viewport.set_child(Some(&bin));
+        root.set_child(Some(&viewport));
 
         let model = DiagnosticsPage {
             commands,
@@ -203,14 +487,16 @@ impl Component for DiagnosticsPage {
             shown_raw: None,
             core_failure: None,
         };
-        let widgets = DiagnosticsWidgets {
+        let mut widgets = DiagnosticsWidgets {
+            overall,
+            cards,
             install_button,
-            dota: RowSection::new(dota_list),
-            server: RowSection::new(server_list),
-            config_row,
-            json_source,
-            json_buffer,
+            results: RowSection::new(results_list.clone()),
+            results_list,
+            details,
         };
+        let mut model = model;
+        model.render(&mut widgets);
         ComponentParts { model, widgets }
     }
 
@@ -240,7 +526,7 @@ impl Component for DiagnosticsPage {
             DiagnosticsMessage::Run => self.send(widgets, UiCommand::RunDiagnostics),
             DiagnosticsMessage::Test => self.send(widgets, UiCommand::TestConnection),
             DiagnosticsMessage::Install => {
-                if let Some(root) = self.first_library() {
+                if let Some(root) = first_library(&self.snapshot) {
                     self.send(
                         widgets,
                         UiCommand::InstallGsiConfig {
@@ -251,7 +537,7 @@ impl Component for DiagnosticsPage {
                 }
             }
             DiagnosticsMessage::ConfirmOverwrite => {
-                if let Some(root) = self.first_library() {
+                if let Some(root) = first_library(&self.snapshot) {
                     self.send(
                         widgets,
                         UiCommand::InstallGsiConfig {
@@ -288,10 +574,6 @@ impl DiagnosticsPage {
         self.render(widgets);
     }
 
-    fn first_library(&self) -> Option<PathBuf> {
-        first_library(&self.snapshot)
-    }
-
     /// Atualiza só o que mudou desde o último estado exibido.
     fn render(&mut self, widgets: &mut DiagnosticsWidgets) {
         let snapshot = &self.snapshot;
@@ -299,325 +581,28 @@ impl DiagnosticsPage {
             .core_failure
             .as_ref()
             .map(|core_error| core_error.to_diagnostic(&snapshot.redactor));
-        let content = diagnostics_content(snapshot, core_failure.as_ref());
+        let content: HealthContent = health_content(snapshot, core_failure.as_ref());
 
+        widgets.overall.show(content.overall);
+        for (widget, card) in widgets.cards.iter_mut().zip(&content.cards) {
+            widget.show(card);
+        }
         if widgets.install_button.is_sensitive() != content.can_install {
             widgets.install_button.set_sensitive(content.can_install);
         }
-        if widgets.config_row.subtitle().as_deref() != Some(content.config_subtitle.as_str()) {
-            widgets.config_row.set_subtitle(&content.config_subtitle);
-        }
-        widgets.dota.show(content.dota);
-        widgets.server.show(content.server);
+        let results: Vec<RowContent> = content.results;
+        widgets.results_list.set_visible(!results.is_empty());
+        widgets.results.show(results);
+        widgets.details.show(&content.details);
 
         let raw = latest_event(snapshot).map(|(event, _)| Arc::clone(&event.raw));
         if raw.as_ref().map(Arc::as_ptr) != self.shown_raw.as_ref().map(Arc::as_ptr) {
-            widgets.json_buffer.set_text(raw.as_deref().unwrap_or(""));
+            widgets
+                .details
+                .json_buffer
+                .set_text(raw.as_deref().unwrap_or(""));
             self.shown_raw = raw;
         }
-        if widgets.json_source.label().as_str() != content.json_source {
-            widgets.json_source.set_label(&content.json_source);
-        }
-    }
-}
-
-/// Biblioteca Steam da primeira instalação do Dota encontrada.
-fn first_library(snapshot: &AppSnapshot) -> Option<PathBuf> {
-    snapshot
-        .diagnostics
-        .as_ref()?
-        .installs
-        .first()
-        .map(|check| check.install.library.clone())
-}
-
-/// Conteúdo da página para o estado, com a falha de comunicação com o
-/// núcleo, quando existe, como primeira linha da conexão GSI.
-pub fn diagnostics_content(
-    snapshot: &AppSnapshot,
-    core_failure: Option<&Diagnostic>,
-) -> DiagnosticsContent {
-    let mut dota: Vec<RowContent> = snapshot
-        .diagnostics_interrupted
-        .iter()
-        .map(|interrupted| RowContent::diagnostic(&interrupted.to_diagnostic(&snapshot.redactor)))
-        .collect();
-    match &snapshot.diagnostics {
-        None => dota.push(RowContent::new(Level::Info, &translate("Verificando…"), "")),
-        Some(report) => dota.extend(dota_rows(report, &snapshot.redactor)),
-    }
-    dota.extend(
-        snapshot
-            .last_install
-            .iter()
-            .map(|outcome| install_row(outcome, &snapshot.redactor)),
-    );
-
-    let mut server: Vec<RowContent> = core_failure
-        .map(RowContent::diagnostic)
-        .into_iter()
-        .collect();
-    server.extend(server_rows(snapshot));
-
-    let json_source = match latest_event(snapshot) {
-        None => translate("Nenhum evento recebido ainda."),
-        Some((event, true)) => {
-            translate_with("Origem: teste manual · {}", &[&format_time(event.at)])
-        }
-        Some((event, false)) => translate_with("Origem: Dota 2 · {}", &[&format_time(event.at)]),
-    };
-
-    DiagnosticsContent {
-        can_install: first_library(snapshot).is_some(),
-        config_subtitle: translate_with(
-            "{} — guarda a porta e o token do GSI. Não compartilhe este arquivo.",
-            &[&snapshot.config_path.display().to_string()],
-        ),
-        dota,
-        server,
-        json_source,
-    }
-}
-
-/// Evento mais recente e se ele veio do botão de teste.
-fn latest_event(snapshot: &AppSnapshot) -> Option<(&ReceivedEvent, bool)> {
-    let gsi = &snapshot.gsi;
-    match (&gsi.last_dota_event, &gsi.last_test_event) {
-        (Some(dota_event), Some(test)) if test.at > dota_event.at => Some((test, true)),
-        (Some(dota_event), _) => Some((dota_event, false)),
-        (None, Some(test)) => Some((test, true)),
-        (None, None) => None,
-    }
-}
-
-fn dota_rows(report: &DiagnosticReport, redactor: &Redactor) -> Vec<RowContent> {
-    let mut rows = Vec::new();
-    rows.push(if report.dota_process_running {
-        RowContent::new(
-            Level::Ok,
-            &translate("Dota 2 está aberto"),
-            &translate("Detectado pela lista de processos do sistema (dota2)."),
-        )
-    } else {
-        RowContent::new(
-            Level::Info,
-            &translate("Dota 2 não está aberto"),
-            &translate("Nenhum processo dota2 encontrado. Normal se o jogo estiver fechado."),
-        )
-    });
-
-    if report.installs.is_empty() {
-        let searched = if report.searched_libraries.is_empty() {
-            translate("nenhuma biblioteca Steam encontrada")
-        } else {
-            report
-                .searched_libraries
-                .iter()
-                .map(|library| library.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        rows.push(RowContent::new(
-            Level::Error,
-            &translate("Dota 2 não encontrado"),
-            &translate_with(
-                "Bibliotecas verificadas: {}. Adicione a sua em extra_libraries no arquivo de configuração.",
-                &[&searched],
-            ),
-        ));
-    }
-
-    for check in &report.installs {
-        let install = &check.install;
-        let kind = match (install.native_binary, install.proton_prefix) {
-            (true, false) => translate("versão nativa Linux"),
-            (true, true) => translate("versão nativa Linux; também há prefixo Proton"),
-            (false, true) => translate("prefixo Proton"),
-            (false, false) => translate("tipo de execução desconhecido"),
-        };
-        rows.push(RowContent::new(
-            Level::Ok,
-            &translate("Dota 2 encontrado"),
-            &format!("{} ({kind})", install.game_root.display()),
-        ));
-
-        rows.push(config_row(check, redactor));
-    }
-    rows
-}
-
-fn config_row(check: &InstallCheck, redactor: &Redactor) -> RowContent {
-    let path = check.config_path.display().to_string();
-    match &check.config {
-        GsiConfigState::Missing => RowContent::new(
-            Level::Warning,
-            &translate("Arquivo GSI não instalado"),
-            &translate_with("{} — use \"Instalar configuração GSI\".", &[&path]),
-        ),
-        GsiConfigState::Matches => {
-            RowContent::new(Level::Ok, &translate("Arquivo GSI instalado"), &path)
-        }
-        GsiConfigState::UriMismatch { found } => RowContent::new(
-            Level::Warning,
-            &translate("Arquivo GSI aponta para outro endereço"),
-            &translate_with(
-                "{} — encontrado: {}. Reinstale para usar a porta atual.",
-                &[&path, found.as_deref().unwrap_or("?")],
-            ),
-        ),
-        GsiConfigState::TokenMismatch => RowContent::new(
-            Level::Warning,
-            &translate("Token do arquivo GSI diferente do aplicativo"),
-            &translate_with("{} — reinstale para atualizar o token.", &[&path]),
-        ),
-        GsiConfigState::Failed(file_error) => {
-            RowContent::diagnostic(&file_error.to_diagnostic(redactor))
-        }
-    }
-}
-
-fn install_row(outcome: &InstallOutcome, redactor: &Redactor) -> RowContent {
-    match outcome {
-        InstallOutcome::Created(path) => RowContent::new(
-            Level::Ok,
-            &translate("Arquivo GSI criado"),
-            &translate_with(
-                "{} — reinicie o Dota 2 para ele ser lido.",
-                &[&path.display().to_string()],
-            ),
-        ),
-        InstallOutcome::Unchanged(path) => RowContent::new(
-            Level::Ok,
-            &translate("Arquivo GSI já estava atualizado"),
-            &path.display().to_string(),
-        ),
-        InstallOutcome::Replaced { path, backup } => RowContent::new(
-            Level::Ok,
-            &translate("Arquivo GSI substituído"),
-            &translate_with(
-                "{} — cópia do arquivo anterior em {}. Reinicie o Dota 2.",
-                &[&path.display().to_string(), &backup.display().to_string()],
-            ),
-        ),
-        InstallOutcome::NeedsConfirmation(path) => RowContent::new(
-            Level::Warning,
-            &translate("Instalação aguardando confirmação"),
-            &translate_with(
-                "{} já existe e é diferente. Nada foi alterado.",
-                &[&path.display().to_string()],
-            ),
-        ),
-        InstallOutcome::Failed(install_error) => {
-            RowContent::diagnostic(&install_error.to_diagnostic(redactor))
-        }
-        InstallOutcome::Interrupted(interrupted) => {
-            RowContent::diagnostic(&interrupted.to_diagnostic(redactor))
-        }
-    }
-}
-
-fn server_rows(snapshot: &AppSnapshot) -> Vec<RowContent> {
-    let gsi = &snapshot.gsi;
-    let mut rows = vec![match &gsi.server {
-        ServerState::Starting => {
-            RowContent::new(Level::Info, &translate("Iniciando servidor local…"), "")
-        }
-        ServerState::Listening(address) => RowContent::new(
-            Level::Ok,
-            &translate_with("Servidor ouvindo em {}", &[&address.to_string()]),
-            &translate("Aceita apenas conexões deste computador e com o token correto."),
-        ),
-        ServerState::Failed(server_error) => {
-            RowContent::diagnostic(&server_error.to_diagnostic(&snapshot.redactor))
-        }
-    }];
-
-    rows.push(match &gsi.last_dota_event {
-        None => RowContent::new(
-            Level::Warning,
-            &translate("Nenhum evento recebido do Dota ainda"),
-            &translate(
-                "Confira a opção -gamestateintegration e o arquivo GSI, reinicie o Dota e entre em \
-                uma partida ou lobby (inclusive contra bots).",
-            ),
-        ),
-        Some(event) => {
-            let recent = event
-                .at
-                .elapsed()
-                .is_ok_and(|elapsed| elapsed.as_secs() <= RECENT_EVENT_SECS);
-            RowContent::new(
-                if recent { Level::Ok } else { Level::Info },
-                &translate_with(
-                    "Eventos recebidos do Dota: {}",
-                    &[&gsi.dota_events.to_string()],
-                ),
-                &if recent {
-                    translate_with("Último: {}", &[&format_time(event.at)])
-                } else {
-                    translate_with(
-                        "Último: {} — sem eventos recentes.",
-                        &[&format_time(event.at)],
-                    )
-                },
-            )
-        }
-    });
-
-    if let Some(log_status) = &snapshot.gsi_log {
-        rows.push(gsi_log_row(log_status, &snapshot.redactor));
-    }
-
-    if let Some((at, reason)) = gsi.last_rejection {
-        let reason = match reason {
-            RejectReason::InvalidToken => translate("token inválido"),
-            RejectReason::InvalidJson => translate("JSON inválido"),
-        };
-        rows.push(RowContent::new(
-            Level::Error,
-            &translate_with("Requisições recusadas: {}", &[&gsi.rejected.to_string()]),
-            &translate_with("Última: {} ({})", &[&format_time(at), &reason]),
-        ));
-    }
-
-    match &snapshot.connection_test {
-        None => {}
-        Some(ConnectionTest::Running) => {
-            rows.push(RowContent::new(Level::Info, &translate("Testando conexão…"), ""))
-        }
-        Some(ConnectionTest::Passed) => rows.push(RowContent::new(
-            Level::Ok,
-            &translate("Teste de conexão bem-sucedido"),
-            &translate("O servidor local recebeu o evento de teste. Isso não confirma que o Dota está enviando dados."),
-        )),
-        Some(ConnectionTest::Failed(test_error)) => {
-            rows.push(RowContent::diagnostic(&test_error.to_diagnostic(&snapshot.redactor)))
-        }
-        Some(ConnectionTest::Interrupted(interrupted)) => {
-            rows.push(RowContent::diagnostic(&interrupted.to_diagnostic(&snapshot.redactor)))
-        }
-    }
-    rows
-}
-
-fn gsi_log_row(log_status: &GsiLogStatus, redactor: &Redactor) -> RowContent {
-    if let Some(stopped) = &log_status.stopped {
-        return RowContent::diagnostic(&stopped.to_diagnostic(redactor));
-    }
-    let log_path = log_status.path.display().to_string();
-    match &log_status.last_error {
-        None => RowContent::new(
-            Level::Info,
-            &translate_with(
-                "Gravando eventos do Dota: {}",
-                &[&log_status.written.to_string()],
-            ),
-            &translate_with(
-                "{} — o arquivo contém SteamID e nome do jogador; não compartilhe.",
-                &[&log_path],
-            ),
-        ),
-        Some(record_error) => RowContent::diagnostic(&record_error.to_diagnostic(redactor)),
     }
 }
 
@@ -628,7 +613,7 @@ fn confirm_overwrite(
 ) {
     let dialog = adw::AlertDialog::new(
         Some(&translate("Substituir arquivo GSI existente?")),
-        Some(&translate_with(
+        Some(&crate::presentation::i18n::translate_with(
             "{} já existe com conteúdo diferente. Uma cópia de segurança será criada antes de substituir.",
             &[&path.display().to_string()],
         )),
@@ -643,7 +628,3 @@ fn confirm_overwrite(
     });
     dialog.present(Some(root));
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/presentation/pages/diagnostics_tests.rs"]
-mod tests;

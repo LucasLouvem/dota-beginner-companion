@@ -11,7 +11,7 @@ use crate::application::ports::{
 use crate::application::state::{MatchStatus, ModeState};
 use crate::domain::builds::PlayerBuild;
 use crate::domain::game::{GameMode, HeroPick};
-use crate::domain::match_data::{ItemPopularity, source_game_modes};
+use crate::domain::match_data::{FinalStats, ItemPopularity, source_game_modes};
 use crate::domain::patch::Patch;
 
 use super::external_sources::ExternalSources;
@@ -99,18 +99,17 @@ impl Recommendations {
         }
     }
 
-    /// Build a mostrar depois de uma atualização: a escolhida antes, se a
-    /// consulta é a mesma (herói, modo e patch) e ela ainda existe; senão, a
-    /// primeira da lista. `None` sem builds.
-    pub fn resolve_selection(
-        &self,
-        previous: Option<&(RecommendationKey, BuildId)>,
-    ) -> Option<BuildId> {
-        let ids = self.build_ids();
-        previous
-            .filter(|(key, id)| *key == self.key && ids.contains(id))
-            .map(|(_, id)| *id)
-            .or_else(|| ids.first().copied())
+    /// Totais finais e duração da partida de uma vitória profissional; as
+    /// públicas guardadas não os têm.
+    pub fn pro_stats(&self, id: &BuildId) -> Option<(&FinalStats, Option<u32>)> {
+        if id.source != BuildSource::Pro {
+            return None;
+        }
+        self.pro
+            .wins
+            .iter()
+            .find(|win| win.hero_match.match_id == id.match_id)
+            .map(|win| (&win.stats, win.hero_match.duration_secs))
     }
 }
 

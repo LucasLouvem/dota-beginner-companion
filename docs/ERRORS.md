@@ -253,14 +253,14 @@ O cliente `providers::http_json` classifica a falha pela categoria que o reqwest
 | Orçamento do aplicativo esgotado antes de uma tentativa                                                                            | `OPENDOTA_BUDGET_EXHAUSTED` | Ver "Orçamento de chamadas ao OpenDota"                       |
 | O cliente HTTP não pôde ser criado                                                                                                 | `UNCLASSIFIED_ERROR`        | Consultar os detalhes técnicos                                |
 
-### Imagens dos itens (`ItemIconError`)
+### Imagens dos itens, heróis e habilidades (`ItemIconError`)
 
-As imagens vêm do CDN da Steam (`providers::steam_cdn`) e ficam guardadas na pasta de cache do usuário (`infrastructure::item_icon_cache`). Uma falha nunca bloqueia a página: o item aparece pelo nome, a falha vai para o log com `log_warning` e a imagem é procurada de novo só na próxima abertura do aplicativo.
+As imagens vêm do CDN da Steam (`providers::steam_cdn`) e ficam guardadas na pasta de cache do usuário (`infrastructure::item_icon_cache`). Uma falha nunca bloqueia a página: o item, o herói ou a habilidade aparece pelo nome, a falha vai para o log com `log_warning` e a imagem é procurada de novo só na próxima abertura do aplicativo.
 
-| Situação                                                                                                                       | Código                  | Comportamento                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ------------------------------------------------------------- |
-| Sem conexão, tempo esgotado, status inesperado, imagem acima de 64 KB, arquivo que não é PNG ou caminho fora da pasta de itens | `ITEM_ICON_UNAVAILABLE` | O item aparece pelo nome; aviso no log                        |
-| Falha ao ler ou gravar a imagem guardada                                                                                       | `ITEM_ICON_UNAVAILABLE` | A imagem baixada aparece mesmo sem ser guardada; aviso no log |
+| Situação                                                                                                                            | Código                  | Comportamento                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------- |
+| Sem conexão, tempo esgotado, status inesperado, imagem acima de 128 KB, arquivo que não é PNG ou caminho fora das pastas de imagens | `ITEM_ICON_UNAVAILABLE` | O item, herói ou habilidade aparece pelo nome; aviso no log   |
+| Falha ao ler ou gravar a imagem guardada                                                                                            | `ITEM_ICON_UNAVAILABLE` | A imagem baixada aparece mesmo sem ser guardada; aviso no log |
 
 ### Dados dos heróis (`HeroDataError`)
 

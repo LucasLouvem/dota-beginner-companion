@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::application::ports::ProviderError;
-use crate::application::state::ModeOrigin;
 use crate::application::use_cases::pro_builds::ProWin;
+use crate::application::use_cases::recommendation_request::RecommendationKey;
 use crate::domain::builds::PlayerBuild;
 use crate::domain::game::{AbilityState, CarriedItem};
 use crate::domain::hero_catalog::{AbilityInfo, AttackType, HeroInfo, PrimaryAttribute};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 fn heroes() -> HeroCatalog {
     HeroCatalog::new(vec![HeroInfo {
+        image_path: None,
         id: 22,
         name: "npc_dota_hero_zuus".into(),
         display_name: "Zeus".into(),
@@ -23,10 +24,12 @@ fn heroes() -> HeroCatalog {
         roles: vec![],
         abilities: vec![
             AbilityInfo {
+                image_path: None,
                 name: "zuus_arc_lightning".into(),
                 display_name: "Arc Lightning".into(),
             },
             AbilityInfo {
+                image_path: None,
                 name: "zuus_lightning_bolt".into(),
                 display_name: "Lightning Bolt".into(),
             },
@@ -113,73 +116,68 @@ fn ready(recommendations: Recommendations) -> RecommendationStatus {
     RecommendationStatus::Ready(Arc::new(recommendations))
 }
 
-fn confirmed(mode: GameMode) -> ModeState {
-    ModeState::Confirmed {
-        mode,
-        origin: ModeOrigin::Chosen,
-    }
-}
-
 fn titles(rows: &[RowContent]) -> Vec<&str> {
     rows.iter().map(|row| row.title.as_str()).collect()
 }
 
 fn sidebar_of(status: &RecommendationStatus) -> Sidebar {
-    sidebar(status, &items())
+    sidebar(status)
 }
 
-fn header(status: &RecommendationStatus, mode: &ModeState) -> Vec<RowContent> {
-    header_rows(status, mode, &heroes(), &Redactor::default())
+fn header_of(status: &RecommendationStatus) -> HeaderContent {
+    header_content(status, &heroes(), &Redactor::default())
+}
+
+/// Avisos do cabeçalho.
+fn header(status: &RecommendationStatus) -> Vec<RowContent> {
+    header_of(status).notices
 }
 
 #[test]
-fn header_shows_hero_mode_patch_counts_and_few_wins() {
-    let rows = header(
-        &ready(listed(
-            GameMode::AllPick,
-            vec![pro_win(1, zeus_build(), None)],
-        )),
-        &confirmed(GameMode::AllPick),
-    );
+fn header_shows_hero_mode_patch_as_title_and_counts_as_details() {
+    let header = header_of(&ready(listed(
+        GameMode::AllPick,
+        vec![pro_win(1, zeus_build(), None)],
+    )));
 
-    assert_eq!(
-        titles(&rows),
-        [
-            "Zeus · Escolha Livre · patch 7.41",
-            "1 vitórias profissionais · 1 vitórias públicas",
-            "Poucas vitórias encontradas",
-        ]
-    );
-    assert!(rows[1].subtitle.contains("patch 7.41"), "{:?}", rows[1]);
+    assert_eq!(header.title, "Zeus · Escolha Livre · patch 7.41");
     assert!(
-        rows[1].subtitle.contains("8 partidas de liga"),
-        "{:?}",
-        rows[1]
+        header
+            .details
+            .starts_with("1 vitórias profissionais e 1 públicas · fonte: OpenDota, 8 partidas de liga recentes examinadas · Consultado às"),
+        "{}",
+        header.details
     );
+    assert_eq!(titles(&header.notices), ["Poucas vitórias encontradas"]);
 }
 
 #[test]
-fn header_warns_about_mode_not_informed_turbo_and_bots() {
-    let turbo = header(
-        &ready(listed(GameMode::Turbo, vec![])),
-        &ModeState::Awaiting {
-            preselected: GameMode::Turbo,
-        },
-    );
-    let bots = header(
-        &ready(listed(GameMode::Bots, vec![])),
-        &confirmed(GameMode::Bots),
-    );
+fn header_before_ready_has_a_plain_title_and_the_state_as_notice() {
+    let header = header_of(&RecommendationStatus::Idle);
+    assert_eq!(header.title, "Build");
+    assert!(header.details.is_empty());
+    assert_eq!(titles(&header.notices), ["Nenhum herói para recomendar"]);
+}
 
-    assert!(titles(&turbo).contains(&"Modo ainda não informado; mostrando dados de Turbo"));
-    assert!(titles(&turbo).contains(&"Partidas profissionais não são turbo"));
+#[test]
+fn header_warns_about_bots_but_not_about_turbo() {
+    let turbo = header(&ready(listed(GameMode::Turbo, vec![])));
+    let bots = header(&ready(listed(GameMode::Bots, vec![])));
+    let all_pick = header(&ready(listed(GameMode::AllPick, vec![])));
+
+    assert!(
+        !titles(&turbo).contains(&"Partidas profissionais não são turbo"),
+        "o aviso de Turbo é da build profissional, não da página"
+    );
     assert!(titles(&bots).contains(
         &"Modo Contra bots: as builds vêm de partidas de Escolha Livre entre jogadores."
     ));
     assert!(
-        !titles(&bots)
+        !titles(&all_pick)
             .iter()
-            .any(|title| title.starts_with("Modo ainda"))
+            .chain(&titles(&turbo))
+            .any(|title| title.starts_with("Modo ainda")),
+        "o modo não informado aparece no card do modo, não como aviso"
     );
 }
 
@@ -191,7 +189,7 @@ fn header_marks_old_data_and_shows_provider_errors() {
         path: "/heroes/22/matches".into(),
     });
 
-    let rows = header(&ready(stale), &confirmed(GameMode::AllPick));
+    let rows = header(&ready(stale));
 
     let old = rows
         .iter()
@@ -208,20 +206,17 @@ fn header_marks_old_data_and_shows_provider_errors() {
 #[test]
 fn header_before_ready_explains_the_state() {
     assert_eq!(
-        titles(&header(&RecommendationStatus::Idle, &ModeState::NotAsked)),
+        titles(&header(&RecommendationStatus::Idle)),
         ["Nenhum herói para recomendar"]
     );
     assert_eq!(
-        titles(&header(
-            &RecommendationStatus::Unavailable,
-            &ModeState::NotAsked
-        )),
+        titles(&header(&RecommendationStatus::Unavailable)),
         ["Recomendações indisponíveis"]
     );
 }
 
 #[test]
-fn sidebar_lists_professional_then_public_wins_with_final_items() {
+fn sidebar_lists_professional_then_public_wins_without_item_thumbnails() {
     let list = sidebar_of(&ready(listed(
         GameMode::AllPick,
         vec![pro_win(1, zeus_build(), None)],
@@ -230,14 +225,8 @@ fn sidebar_lists_professional_then_public_wins_with_final_items() {
     assert_eq!(list.pro[0].id, PRO);
     assert_eq!(list.pro[0].title, "Liga Teste");
     assert_eq!(list.pro[0].subtitle, "40:00");
-    let labels: Vec<&str> = list.pro[0]
-        .items
-        .iter()
-        .map(|chip| chip.label.as_str())
-        .collect();
-    assert_eq!(labels, ["Blink Dagger", "Black King Bar"]);
     assert_eq!(list.public[0].id, PUBLIC);
-    assert_eq!(list.public[0].title, "Partida pública · Lenda 1");
+    assert_eq!(list.public[0].title, "Rank médio Lenda 1");
     assert_eq!(list.empty, None);
     assert_eq!(list.entries().count(), 2);
 }
@@ -275,10 +264,6 @@ fn selection_never_changes_the_header_or_the_sidebar() {
     let public = detail(&recommendations, &PUBLIC, None).unwrap();
 
     assert_ne!(pro, public);
-    assert_eq!(
-        header(&status, &confirmed(GameMode::AllPick)),
-        header(&status, &confirmed(GameMode::AllPick))
-    );
 }
 
 #[test]
@@ -315,11 +300,11 @@ fn analyzed_build_shows_starting_items_order_with_progress_and_windows() {
 
     assert!(build.notes.is_empty());
     assert_eq!(build.starting[0].label, "Tango");
-    assert_eq!(build.starting[0].time, Some(-89));
     assert_eq!(
-        build.starting[0].accessible_label(),
-        "Tango, comprado antes do início"
+        build.starting[0].time, None,
+        "o título do card já diz que é antes do início"
     );
+    assert_eq!(build.starting[0].accessible_label(), "Tango");
     let order: Vec<(&str, Option<StepState>)> = build
         .order
         .iter()
@@ -334,11 +319,9 @@ fn analyzed_build_shows_starting_items_order_with_progress_and_windows() {
         ],
         "Blink comprada aos 12:34; BKB e Smoke sem compra registrada vão para o fim, na ordem dos espaços (inventário, depois mochila)"
     );
-    assert_eq!(build.neutral[1].label, "Greedy");
+    assert_eq!(build.neutral[0].label, "Partisan's Brand");
+    assert_eq!(build.enhancement[0].label, "Greedy");
     assert_eq!(build.backpack[0].label, "Smoke of Deceit");
-    assert_eq!(build.windows[0].0, "Antes do início");
-    assert_eq!(build.windows[1].0, "De 10 a 25 minutos");
-    assert_eq!(build.windows[1].1[0].time, Some(754));
 }
 
 #[test]
@@ -369,7 +352,6 @@ fn public_build_without_purchase_log_says_the_order_is_by_slot() {
 
     assert_eq!(titles(&build.notes), ["Partida sem registro de compras"]);
     assert!(build.starting.is_empty());
-    assert!(build.windows.is_empty());
     assert_eq!(build.order.len(), 3);
     assert_eq!(build.abilities, None);
     assert_eq!(
@@ -379,7 +361,7 @@ fn public_build_without_purchase_log_says_the_order_is_by_slot() {
 }
 
 #[test]
-fn professional_build_in_turbo_is_never_shown_as_turbo() {
+fn only_the_professional_build_in_turbo_warns_that_it_is_not_turbo() {
     let recommendations = listed(GameMode::Turbo, vec![pro_win(1, zeus_build(), None)]);
 
     let pro = detail(&recommendations, &PRO, None).unwrap();
@@ -387,11 +369,19 @@ fn professional_build_in_turbo_is_never_shown_as_turbo() {
 
     assert_eq!(pro.notes[0].title, "Partidas profissionais não são turbo");
     assert!(
-        !public
+        public
             .notes
             .iter()
-            .any(|note| note.title == "Partidas profissionais não são turbo")
+            .all(|note| note.title != "Partidas profissionais não são turbo"),
+        "a vitória pública de Turbo é de Turbo; não há o que avisar"
     );
+}
+
+#[test]
+fn professional_build_outside_turbo_has_no_turbo_warning() {
+    let recommendations = listed(GameMode::AllPick, vec![pro_win(1, zeus_build(), None)]);
+    let pro = detail(&recommendations, &PRO, None).unwrap();
+    assert!(pro.notes.is_empty());
 }
 
 fn learned(levels: &[(&str, u32)], talents: u32) -> GameSnapshot {
@@ -429,6 +419,16 @@ fn ability_grid_follows_the_real_order_with_the_points_spent() {
         .unwrap();
 
     assert_eq!(
+        grid.images,
+        [
+            Some("zuus_lightning_bolt".to_owned()),
+            Some("zuus_arc_lightning".to_owned()),
+            None,
+            None
+        ],
+        "talento e habilidade desconhecida ficam sem imagem"
+    );
+    assert_eq!(
         grid.rows,
         [
             "Lightning Bolt",
@@ -446,10 +446,6 @@ fn ability_grid_follows_the_real_order_with_the_points_spent() {
             (2, StepState::Pending),
             (3, StepState::Pending),
         ]
-    );
-    assert_eq!(
-        grid.max_order,
-        "Arc Lightning > Lightning Bolt > habilidade 9"
     );
     assert!(
         grid.summary
@@ -489,41 +485,6 @@ fn item_chip_reads_name_time_and_state() {
         "Blink Dagger, comprado em 12:34, próximo"
     );
     assert_eq!(chip.marker(), "→");
-}
-
-#[test]
-fn progress_row_waits_for_hero_data() {
-    assert_eq!(
-        progress_row(None).subtitle,
-        "O progresso aparece quando o Dota envia os dados do herói."
-    );
-    let game = GameSnapshot {
-        hero_level: Some(12),
-        ..GameSnapshot::menu()
-    };
-    assert!(progress_row(Some(&game)).subtitle.contains("12"));
-}
-
-#[test]
-fn every_window_has_a_label() {
-    let labels: Vec<String> = [
-        PurchaseWindow::BeforeStart,
-        PurchaseWindow::Early,
-        PurchaseWindow::Mid,
-        PurchaseWindow::Late,
-    ]
-    .into_iter()
-    .map(window_label)
-    .collect();
-    assert_eq!(
-        labels,
-        [
-            "Antes do início",
-            "Até 10 minutos",
-            "De 10 a 25 minutos",
-            "Depois de 25 minutos"
-        ]
-    );
 }
 
 #[test]
@@ -569,38 +530,6 @@ fn purchase_before_the_start_has_no_clock() {
 }
 
 #[test]
-fn popularity_lists_the_most_bought_items_by_phase_with_the_source() {
-    let ready = listed(GameMode::AllPick, vec![]);
-
-    let rows = popularity_rows(&ready, &items(), &Redactor::default());
-
-    assert_eq!(rows[0].title, "Início: item_branches, item_satanic");
-    assert_eq!(rows[1].level, Level::Warning, "dados antigos");
-}
-
-#[test]
-fn every_phase_has_a_label() {
-    let labels: Vec<String> = [
-        PopularityPhase::Start,
-        PopularityPhase::Early,
-        PopularityPhase::Mid,
-        PopularityPhase::Late,
-    ]
-    .into_iter()
-    .map(phase_label)
-    .collect();
-    assert_eq!(
-        labels,
-        [
-            "Início",
-            "Até 10 minutos",
-            "De 10 a 25 minutos",
-            "Depois de 25 minutos"
-        ]
-    );
-}
-
-#[test]
 fn ability_names_fall_back_to_internal_name_and_id() {
     let abilities = AbilityIdCatalog::new(HashMap::from([
         (5110, "zuus_arc_lightning".to_owned()),
@@ -626,11 +555,158 @@ fn loading_header_names_the_hero_and_mode() {
         },
     };
     assert_eq!(
-        header(&loading, &ModeState::NotAsked),
+        header(&loading),
         vec![RowContent::new(
             Level::Info,
             "Carregando recomendações de Zeus",
             "Turbo"
         )]
+    );
+}
+
+fn three_wins() -> Sidebar {
+    sidebar_of(&ready(listed(
+        GameMode::AllPick,
+        vec![
+            pro_win(1, zeus_build(), None),
+            pro_win(3, zeus_build(), None),
+        ],
+    )))
+}
+
+fn builds_of(sidebar: &Sidebar) -> Vec<BuildId> {
+    sidebar.entries().map(|entry| entry.id).collect()
+}
+
+fn key() -> RecommendationKey {
+    RecommendationKey {
+        hero_id: 22,
+        mode: GameMode::AllPick,
+        patch_id: 60,
+    }
+}
+
+fn pro_id(match_id: u64) -> BuildId {
+    BuildId {
+        source: BuildSource::Pro,
+        match_id,
+    }
+}
+
+#[test]
+fn selection_is_kept_while_the_build_stays_in_the_list() {
+    let items = sidebar_items(&three_wins());
+    let id = builds_of(&three_wins())[1];
+    assert_eq!(select_build(Some(&(key(), id)), &key(), &items), Some(id));
+}
+
+#[test]
+fn selection_falls_back_to_the_first_build() {
+    let items = sidebar_items(&three_wins());
+    let first = builds_of(&three_wins())[0];
+    assert_eq!(select_build(None, &key(), &items), Some(first));
+    assert_eq!(
+        select_build(Some(&(key(), pro_id(999))), &key(), &items),
+        Some(first),
+        "a build que não existe mais"
+    );
+    let other_key = RecommendationKey {
+        hero_id: 5,
+        ..key()
+    };
+    assert_eq!(
+        select_build(Some(&(other_key, pro_id(1))), &key(), &items),
+        Some(first),
+        "outra consulta"
+    );
+}
+
+#[test]
+fn no_builds_means_no_selection() {
+    let items = sidebar_items(&sidebar_of(&RecommendationStatus::Idle));
+    assert_eq!(select_build(None, &key(), &items), None);
+}
+
+#[test]
+fn sidebar_entries_carry_the_result_of_the_player() {
+    let kda = Kda {
+        kills: 3,
+        deaths: 8,
+        assists: 16,
+    };
+    let mut pro = pro_win(1, zeus_build(), None);
+    pro.hero_match.kda = Some(kda);
+    let mut recommendations = listed(GameMode::AllPick, vec![pro]);
+    recommendations.public_wins[0].kda = Some(Kda {
+        kills: 10,
+        deaths: 0,
+        assists: 2,
+    });
+
+    let list = sidebar_of(&ready(recommendations));
+
+    assert_eq!(list.pro[0].kda, Some(kda));
+    assert_eq!(kda_text(kda), "3/8/16");
+    assert_eq!(
+        kda_label(kda),
+        "abates 3, mortes 8, assistências 16",
+        "o leitor de tela lê por extenso"
+    );
+    assert_eq!(list.public[0].kda.map(kda_text).as_deref(), Some("10/0/2"));
+}
+
+#[test]
+fn sidebar_entry_without_result_has_none() {
+    let list = sidebar_of(&ready(listed(
+        GameMode::AllPick,
+        vec![pro_win(1, zeus_build(), None)],
+    )));
+    assert_eq!(list.pro[0].kda, None);
+}
+
+#[test]
+fn public_entry_without_rank_says_so() {
+    let mut recommendations = listed(GameMode::AllPick, vec![]);
+    recommendations.public_wins[0].avg_rank_tier = None;
+
+    let list = sidebar_of(&ready(recommendations));
+
+    assert_eq!(list.public[0].title, "Rank médio não informado");
+}
+
+#[test]
+fn only_professional_builds_with_totals_have_a_comparison() {
+    let mut pro = pro_win(1, zeus_build(), None);
+    pro.stats = crate::domain::match_data::FinalStats {
+        last_hits: Some(184),
+        gpm: Some(469),
+        ..Default::default()
+    };
+    pro.hero_match.duration_secs = Some(2042);
+    let recommendations = listed(GameMode::AllPick, vec![pro, pro_win(3, zeus_build(), None)]);
+
+    let with_totals = detail(&recommendations, &PRO, None).unwrap();
+    let without_totals = detail(
+        &recommendations,
+        &BuildId {
+            source: BuildSource::Pro,
+            match_id: 3,
+        },
+        None,
+    )
+    .unwrap();
+    let public = detail(&recommendations, &PUBLIC, None).unwrap();
+
+    let comparison = with_totals
+        .comparison
+        .expect("a profissional com totais compara");
+    assert_eq!(comparison.rows.len(), 4);
+    assert_eq!(
+        without_totals.comparison, None,
+        "sem totais não há o que comparar"
+    );
+    assert_eq!(
+        public.comparison, None,
+        "as públicas guardadas não têm os totais"
     );
 }

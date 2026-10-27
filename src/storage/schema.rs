@@ -12,10 +12,10 @@ use rusqlite::{Connection, ErrorCode};
 use crate::application::ports::{SharedError, StorageError, StorageFailureKind};
 
 /// Versão do schema gravada em `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Migrações em ordem: a de índice `n` leva da versão `n` para a `n + 1`.
-const MIGRATIONS: [&str; 3] = [
+const MIGRATIONS: [&str; 5] = [
     // 1: cache com prazo de validade.
     "CREATE TABLE cache (
         key TEXT PRIMARY KEY NOT NULL,
@@ -72,6 +72,20 @@ const MIGRATIONS: [&str; 3] = [
     );
     CREATE INDEX public_wins_by_hero
         ON public_wins (hero_id, patch_id, game_mode, start_time);",
+    // 4: as vitórias públicas passam a guardar abates, mortes e assistências.
+    // As linhas e os detalhes de partida em cache da versão 3 não têm esses
+    // números, então saem, e o cursor volta ao início para a coleta refazer
+    // as vitórias já com esses números.
+    "DELETE FROM public_wins;
+    DELETE FROM collection_cursor;
+    DELETE FROM cache WHERE key LIKE 'stats/matches/%';
+    ALTER TABLE public_wins ADD COLUMN kills INTEGER;
+    ALTER TABLE public_wins ADD COLUMN deaths INTEGER;
+    ALTER TABLE public_wins ADD COLUMN assists INTEGER;",
+    // 5: os detalhes de partida em cache foram reduzidos sem os totais finais
+    // (last hits, denies, GPM, XPM, patrimônio e wards) que a comparação com
+    // a build usa; saem do cache e voltam a ser buscados quando preciso.
+    "DELETE FROM cache WHERE key LIKE 'stats/matches/%';",
 ];
 
 /// O banco foi criado por uma versão mais nova do aplicativo.

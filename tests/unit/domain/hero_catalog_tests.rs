@@ -4,6 +4,7 @@ use super::*;
 
 fn zeus() -> HeroInfo {
     HeroInfo {
+        image_path: None,
         id: 22,
         name: "npc_dota_hero_zuus".into(),
         display_name: "Zeus".into(),
@@ -11,6 +12,7 @@ fn zeus() -> HeroInfo {
         attack_type: AttackType::Ranged,
         roles: vec![HeroRole::Nuker, HeroRole::Carry],
         abilities: vec![AbilityInfo {
+            image_path: None,
             name: "zuus_arc_lightning".into(),
             display_name: "Arc Lightning".into(),
         }],

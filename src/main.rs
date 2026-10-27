@@ -89,6 +89,17 @@ fn main() -> anyhow::Result<()> {
     // Sem o banco local ou o cliente HTTP o app segue, sem recomendações nem
     // coleta de partidas públicas.
     let external = external_sources(&storage::database_path(), &items);
+    // Sem os dados embutidos o app segue: a aba Herói mostra só o que o GSI informa.
+    let heroes = Arc::new(
+        infrastructure::hero_data::embedded_catalog().unwrap_or_else(|data_error| {
+            log_error(
+                &data_error.to_diagnostic(&Redactor::default()),
+                "embedded hero data is invalid; hero tab shows GSI data only",
+            );
+            HeroCatalog::default()
+        }),
+    );
+
     let dependencies = CoreDependencies {
         locator: Arc::new(infrastructure::steam_locator::SteamLocator::new(
             home,
@@ -108,7 +119,7 @@ fn main() -> anyhow::Result<()> {
         items: Arc::clone(&items),
         endpoint: endpoint.clone(),
         external: external.clone(),
-        icons: icon_sources(&items),
+        icons: icon_sources(&items, &heroes),
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -144,15 +155,6 @@ fn main() -> anyhow::Result<()> {
         runtime.spawn(run_collection(sources));
     }
 
-    // Sem os dados embutidos o app segue: a aba Herói mostra só o que o GSI informa.
-    let heroes = infrastructure::hero_data::embedded_catalog().unwrap_or_else(|data_error| {
-        log_error(
-            &data_error.to_diagnostic(&Redactor::default()),
-            "embedded hero data is invalid; hero tab shows GSI data only",
-        );
-        HeroCatalog::default()
-    });
-
     // Sem os dados embutidos o app segue: a ordem de habilidades aparece com
     // os IDs.
     let abilities =
@@ -170,7 +172,7 @@ fn main() -> anyhow::Result<()> {
         .run::<App>(CoreHandle {
             commands: command_sender,
             state: state_receiver,
-            heroes: Arc::new(heroes),
+            heroes,
             items,
             abilities: Arc::new(abilities),
         });
@@ -218,9 +220,9 @@ fn external_sources(database: &Path, items: &Arc<ItemCatalog>) -> Option<Externa
     })
 }
 
-/// Imagens dos itens (CDN da Steam com cache em disco), ou `None` (com o
-/// motivo no log): os itens aparecem pelo nome.
-fn icon_sources(items: &Arc<ItemCatalog>) -> Option<IconSources> {
+/// Imagens de itens, heróis e habilidades (CDN da Steam com cache em disco),
+/// ou `None` (com o motivo no log): tudo aparece pelo nome.
+fn icon_sources(items: &Arc<ItemCatalog>, heroes: &Arc<HeroCatalog>) -> Option<IconSources> {
     let Some(dir) = ItemIconCache::default_dir() else {
         tracing::warn!("item icons disabled: no user cache folder");
         return None;
@@ -237,6 +239,7 @@ fn icon_sources(items: &Arc<ItemCatalog>) -> Option<IconSources> {
         source: Arc::new(source) as Arc<dyn ItemIconSource>,
         store: Arc::new(ItemIconCache::new(dir)) as Arc<dyn ItemIconStore>,
         items: Arc::clone(items),
+        heroes: Arc::clone(heroes),
     })
 }
 

@@ -51,6 +51,9 @@ impl ProcessProbe for ClosedDota {
     fn dota_running(&self) -> bool {
         false
     }
+    fn steam_running(&self) -> bool {
+        false
+    }
 }
 
 /// Arquivos que entram em pânico em qualquer acesso.
@@ -1021,6 +1024,7 @@ async fn icons_of_carried_items_are_published_and_requested_once() {
                 source: source.clone(),
                 store: Arc::new(NoCache),
                 items: Arc::new(items),
+                heroes: Arc::default(),
             }),
             ..dependencies()
         },

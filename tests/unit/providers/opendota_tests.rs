@@ -124,6 +124,11 @@ fn real_hero_matches_are_all_league_matches_with_the_hero_result() {
     assert_eq!(
         matches[0],
         HeroMatch {
+            kda: Some(Kda {
+                kills: 3,
+                deaths: 8,
+                assists: 16,
+            }),
             match_id: 9_055_224_065,
             start_time: Some(1_792_590_894),
             league_id: Some(18631),
@@ -157,6 +162,27 @@ fn real_match_details_have_the_zeus_full_build_and_abilities() {
     assert_eq!(details.players.len(), 10);
     let zeus = details.player_with_hero(22).unwrap();
     assert_eq!(zeus.won, Some(true));
+    assert_eq!(
+        zeus.kda,
+        Some(Kda {
+            kills: 3,
+            deaths: 8,
+            assists: 16
+        }),
+        "o mesmo resultado da lista de partidas do herói"
+    );
+    assert_eq!(
+        zeus.stats,
+        FinalStats {
+            last_hits: Some(184),
+            denies: Some(3),
+            gpm: Some(469),
+            xpm: Some(483),
+            net_worth: Some(15_044),
+            observers_placed: Some(4),
+            sentries_placed: Some(2),
+        }
+    );
     assert_eq!(details.patch_of(zeus), Some(60));
     let build = zeus.build.as_ref().unwrap();
     assert_eq!(build.inventory[0], "item_refresher");
@@ -396,4 +422,57 @@ fn item_popularity_that_is_not_an_object_has_unexpected_format() {
         matches!(error, ProviderError::UnexpectedFormat { .. }),
         "{error:?}"
     );
+}
+
+#[test]
+fn result_needs_all_three_numbers() {
+    let matches = decode_hero_matches(
+        r#"[{"match_id": 1, "kills": 3, "deaths": 8},
+            {"match_id": 2, "kills": 3, "deaths": 8, "assists": 16}]"#,
+    )
+    .unwrap();
+    assert_eq!(matches[0].kda, None);
+    assert_eq!(
+        matches[1].kda,
+        Some(Kda {
+            kills: 3,
+            deaths: 8,
+            assists: 16
+        })
+    );
+}
+
+#[test]
+fn reduced_match_keeps_the_result_of_each_player() {
+    let reduced = reduce_match(
+        &serde_json::from_str(
+            r#"{"match_id": 1, "players": [{"hero_id": 22, "kills": 3, "deaths": 8, "assists": 16, "account_id": 7}]}"#,
+        )
+        .unwrap(),
+    );
+    let player = &reduced["players"][0];
+    assert_eq!(player["kills"], 3);
+    assert!(player.get("account_id").is_none(), "nada de conta");
+}
+
+#[test]
+fn missing_totals_stay_missing_and_the_reduced_match_keeps_the_used_ones() {
+    let details = decode_match_details(
+        r#"{"match_id": 1, "players": [{"hero_id": 22, "last_hits": 10}]}"#,
+        &items(),
+    )
+    .unwrap();
+    let stats = details.players[0].stats;
+    assert_eq!(stats.last_hits, Some(10));
+    assert_eq!(stats.gpm, None);
+
+    let reduced = reduce_match(
+        &serde_json::from_str(
+            r#"{"match_id": 1, "players": [{"hero_id": 22, "gold_per_min": 400, "obs_placed": 3, "account_id": 7}]}"#,
+        )
+        .unwrap(),
+    );
+    assert_eq!(reduced["players"][0]["gold_per_min"], 400);
+    assert_eq!(reduced["players"][0]["obs_placed"], 3);
+    assert!(reduced["players"][0].get("account_id").is_none());
 }

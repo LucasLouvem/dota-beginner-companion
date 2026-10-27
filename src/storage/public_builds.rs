@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use crate::application::ports::{PublicBuildStore, PublicWin, StorageError};
 use crate::domain::builds::{PlayerBuild, Purchase};
+use crate::domain::match_data::Kda;
 
 use super::schema::{open_database, sqlite_kind};
 
@@ -64,8 +65,9 @@ impl PublicBuildStore for SqlitePublicBuildStore {
                 .execute(
                     "INSERT OR IGNORE INTO public_wins
                      (match_id, hero_id, game_mode, patch_id, start_time, avg_rank_tier,
-                      inventory, backpack, neutral, neutral_enhancement, purchases)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                      inventory, backpack, neutral, neutral_enhancement, purchases,
+                      kills, deaths, assists)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         to_sql_id(win.match_id),
                         win.hero_id,
@@ -78,6 +80,9 @@ impl PublicBuildStore for SqlitePublicBuildStore {
                         build.neutral,
                         build.neutral_enhancement,
                         purchases,
+                        win.kda.map(|kda| kda.kills),
+                        win.kda.map(|kda| kda.deaths),
+                        win.kda.map(|kda| kda.assists),
                     ],
                 )
                 .map_err(save_error)?;
@@ -127,7 +132,7 @@ impl PublicBuildStore for SqlitePublicBuildStore {
         // não usa LIMIT: o limite vale para as vitórias válidas.
         let sql = format!(
             "SELECT match_id, game_mode, start_time, avg_rank_tier, inventory, backpack,
-                    neutral, neutral_enhancement, purchases
+                    neutral, neutral_enhancement, purchases, kills, deaths, assists
              FROM public_wins
              WHERE hero_id = ? AND patch_id = ? AND game_mode IN ({placeholders})
              ORDER BY start_time IS NULL, start_time DESC, match_id DESC"
@@ -154,6 +159,9 @@ impl PublicBuildStore for SqlitePublicBuildStore {
                 neutral: row.get(6).map_err(read_error)?,
                 neutral_enhancement: row.get(7).map_err(read_error)?,
                 purchases: row.get(8).map_err(read_error)?,
+                kills: row.get(9).map_err(read_error)?,
+                deaths: row.get(10).map_err(read_error)?,
+                assists: row.get(11).map_err(read_error)?,
             };
             // Linha que não se lê como build é ignorada, em vez de invalidar
             // todas as outras.
@@ -185,6 +193,9 @@ struct StoredWin {
     neutral: Option<String>,
     neutral_enhancement: Option<String>,
     purchases: Option<String>,
+    kills: Option<u32>,
+    deaths: Option<u32>,
+    assists: Option<u32>,
 }
 
 impl StoredWin {
@@ -206,6 +217,15 @@ impl StoredWin {
                 neutral: self.neutral,
                 neutral_enhancement: self.neutral_enhancement,
                 purchases,
+            },
+            // Só vale com os três números.
+            kda: match (self.kills, self.deaths, self.assists) {
+                (Some(kills), Some(deaths), Some(assists)) => Some(Kda {
+                    kills,
+                    deaths,
+                    assists,
+                }),
+                _ => None,
             },
         })
     }

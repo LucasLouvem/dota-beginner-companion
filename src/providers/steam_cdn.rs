@@ -1,7 +1,7 @@
-//! Imagens dos itens no CDN da Steam, pelo caminho que o dotaconstants
-//! informa. Só baixa caminhos da pasta de itens do Dota, com tempo limite,
-//! limite de tamanho, poucas conexões ao mesmo tempo e conferência de que o
-//! arquivo é PNG.
+//! Imagens de itens, heróis e habilidades no CDN da Steam, pelo caminho que
+//! o dotaconstants informa. Só baixa caminhos das pastas desses três tipos no
+//! Dota, com tempo limite, limite de tamanho, poucas conexões ao mesmo tempo e
+//! conferência de que o arquivo é PNG.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,8 +14,12 @@ use super::http_json::HttpJsonClientError;
 
 /// Assinatura de todo arquivo PNG.
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
-/// Pasta das imagens de itens no CDN; outros caminhos são recusados.
-const ITEM_IMAGES_PREFIX: &str = "/apps/dota2/images/dota_react/items/";
+/// Pastas das imagens no CDN; outros caminhos são recusados.
+const IMAGE_PREFIXES: [&str; 3] = [
+    "/apps/dota2/images/dota_react/items/",
+    "/apps/dota2/images/dota_react/heroes/",
+    "/apps/dota2/images/dota_react/abilities/",
+];
 const USER_AGENT: &str = concat!("dota-beginner-companion/", env!("CARGO_PKG_VERSION"));
 
 /// Configuração do cliente.
@@ -30,19 +34,20 @@ pub struct SteamCdnConfig {
 }
 
 impl Default for SteamCdnConfig {
-    /// Valores do aplicativo: 10 s por imagem, até 64 KB (as imagens têm
-    /// cerca de 12 KB) e até 4 downloads ao mesmo tempo.
+    /// Valores do aplicativo: 10 s por imagem, até 128 KB (os itens têm cerca
+    /// de 12 KB, as habilidades 30 KB e os retratos de heróis 80 KB) e até 4
+    /// downloads ao mesmo tempo.
     fn default() -> Self {
         Self {
             base_url: "https://cdn.cloudflare.steamstatic.com".into(),
             timeout: Duration::from_secs(10),
-            max_bytes: 64 * 1024,
+            max_bytes: 128 * 1024,
             max_concurrent: 4,
         }
     }
 }
 
-/// Imagens dos itens no CDN da Steam.
+/// Imagens no CDN da Steam.
 pub struct SteamCdnIcons {
     client: reqwest::Client,
     config: SteamCdnConfig,
@@ -64,7 +69,7 @@ impl SteamCdnIcons {
     }
 
     async fn download(&self, path: &str) -> Result<Vec<u8>, ItemIconError> {
-        if !is_item_image_path(path) {
+        if !is_image_path(path) {
             return Err(ItemIconError::UnexpectedPath { path: path.into() });
         }
         // O semáforo nunca é fechado, então a espera só termina com a vaga.
@@ -118,11 +123,14 @@ impl ItemIconSource for SteamCdnIcons {
     }
 }
 
-/// Caminho da pasta de itens com nome simples (letras minúsculas, números,
-/// `_` e `.png`), seguido ou não da marca de versão `?t=<números>`. Recusa
-/// `..`, outras pastas e outros parâmetros.
-pub fn is_item_image_path(path: &str) -> bool {
-    let Some(rest) = path.strip_prefix(ITEM_IMAGES_PREFIX) else {
+/// Caminho de uma das pastas de imagens com nome simples (letras minúsculas,
+/// números, `_` e `.png`), seguido ou não da marca de versão `?t=<números>`.
+/// Recusa `..`, outras pastas e outros parâmetros.
+pub fn is_image_path(path: &str) -> bool {
+    let Some(rest) = IMAGE_PREFIXES
+        .iter()
+        .find_map(|prefix| path.strip_prefix(prefix))
+    else {
         return false;
     };
     let (file, version) = match rest.split_once('?') {

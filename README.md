@@ -8,38 +8,40 @@ Feito para Arch Linux com KDE Plasma (Wayland), em Rust com GTK4 + Relm4.
 
 A aba **Herói** começa pela página da build, com dados do [OpenDota](https://www.opendota.com/) do patch atual para o herói e o modo da partida:
 
-- à esquerda, as 3 vitórias mais recentes do herói em partidas profissionais de liga e as 5 mais recentes em partidas públicas do modo, com as imagens dos itens finais; escolha uma para acompanhá-la (a escolha fica só no aplicativo e não muda nada no jogo);
-- à direita, a build real da vitória escolhida, como o jogador fez: itens iniciais, a ordem dos itens completos com o que você já comprou (✓) e o próximo (→), itens finais, mochila, item neutro com o aprimoramento e todas as compras por fase, com o minuto de cada uma; o aplicativo não monta builds nem esconde itens;
+- à esquerda, as 3 vitórias mais recentes do herói em partidas profissionais de liga e as 5 mais recentes em partidas públicas do modo, só com título, data, duração e, à direita, o K/D/A do jogador naquela vitória; escolha uma para acompanhá-la (a escolha fica só no aplicativo e não muda nada no jogo).
+- à direita, a build real da vitória escolhida, como o jogador fez: itens iniciais, a ordem dos itens completos com o que você já comprou (✓) e o próximo (→), itens finais, mochila e item neutro com o aprimoramento; o aplicativo não monta builds nem esconde itens;
+- para as vitórias profissionais, o card "Você × build" compara as suas médias por minuto (last hits, denies, ouro e experiência) com as do jogador da build, com a diferença em porcentagem e "à frente" ou "atrás" em texto;
 - a grade da ordem de habilidades da vitória, ponto a ponto, com os pontos que você já gastou;
-- em cima, o herói, o modo, o patch, quantas vitórias foram encontradas, se os dados são antigos e avisos: em Turbo, as vitórias profissionais não são de Turbo; Contra bots usa os dados de Escolha Livre; as partidas não são separadas por posição (1 a 5);
-- embaixo, os itens mais comprados por fase em partidas profissionais, como popularidade, não taxa de vitória.
+- em cima, o herói com o atributo e as funções (dados fixos do herói), o botão "Partida encontrada" (marca a partida quando o aplicativo não a deduziu) e o patch e a fonte e os avisos (inclusive de dados antigos); Contra bots usa os dados de Escolha Livre; as partidas não são separadas por posição (1 a 5); ao escolher uma vitória profissional em Turbo, um aviso lembra que ela é de uma partida normal (as vitórias públicas de Turbo são de Turbo, sem aviso);
 
-As imagens dos itens são baixadas do CDN da Steam na primeira vez e guardadas em `~/.cache/dota-companion/item-icons/`; sem rede, os itens aparecem pelo nome. As imagens são da Valve e não fazem parte do repositório.
+As imagens dos itens, o retrato do herói e os ícones das habilidades são baixados do CDN da Steam na primeira vez e guardadas em `~/.cache/dota-companion/item-icons/`; sem rede, tudo aparece pelo nome. As imagens são da Valve e não fazem parte do repositório.
 
-Na mesma aba, abaixo da build, o aplicativo acompanha a partida pelo GSI:
+Na mesma página, em cards, o aplicativo acompanha a partida pelo GSI:
 
-- quando a partida é encontrada, pergunta numa janela do próprio aplicativo o modo de jogo (Escolha Livre, Turbo ou Contra bots), que o GSI não informa; a escolha vem marcada com o último modo confirmado e pode ser alterada depois;
+- quando a partida é encontrada, pergunta numa janela do próprio aplicativo o modo de jogo (Escolha Livre, Turbo ou Contra bots), que o GSI não informa; a escolha vem marcada com o último modo confirmado e vale até a partida acabar (o modo não muda no meio do jogo, então a página não tem botão para alterá-lo);
 - mostra o herói escolhido com atributo, tipo de ataque e funções, a partir de dados embutidos do [dotaconstants](https://github.com/odota/dotaconstants) (sem rede), que também fornecem os nomes e as receitas dos itens;
-- mostra as estatísticas da partida (abates, mortes, assistências, last hits, denies, GPM, XPM, nível e ouro) e os itens carregados, com nomes de exibição, inclusive o item neutro e o aprimoramento dele;
-- lista as habilidades com o nível atual informado pelo GSI;
-- monta a linha do tempo da partida: partida encontrada, herói escolhido, início e fim da partida, níveis de habilidade, itens que entram ou saem, itens neutros, itens montados a partir dos componentes e mortes (o TP fica de fora);
+- usa as suas estatísticas da partida (last hits, denies, GPM e XPM) só para a comparação com a build, e os itens carregados para marcar o progresso da ordem de compra;
+- usa os pontos de habilidade gastos, informados pelo GSI, para marcar o progresso na grade da ordem de habilidades da build;
+- monta a linha do tempo da partida (ainda sem tela: ela vai para a aba Histórico): partida encontrada, herói escolhido, início e fim da partida, níveis de habilidade, itens que entram ou saem, itens neutros, itens montados a partir dos componentes e mortes (o TP fica de fora);
 - depois que a partida termina, mostra o resumo dela (resultado, duração, estatísticas, itens finais e o ID da partida, quando o Dota o envia) até a próxima partida ser encontrada;
 - indica a origem de cada informação: dado embutido, confirmado pelo GSI, inferido pelo aplicativo ou marcado por você;
 - tem o botão **Partida encontrada**, para marcar esse momento manualmente, já que o GSI não o informa.
 
-A aba **Dados profissionais** mostra as partidas profissionais recentes com o herói (liga, resultado, data e duração).
+As vitórias profissionais recentes com o herói (liga, data e duração) aparecem na lista de builds da aba **Herói**; não há aba separada para elas. As abas ficam no topo da janela e, em janela estreita, numa barra embaixo.
 
 As partidas públicas são coletadas em segundo plano enquanto o aplicativo está aberto. O aplicativo limita as próprias chamadas ao OpenDota (por padrão, 1.000 por dia, com até 700 para a coleta) e guarda as respostas no banco local.
 
-A tela **Diagnóstico** mostra se tudo está pronto para o GSI funcionar:
+A tela **Diagnóstico** é uma tela de saúde do aplicativo. No alto, o estado geral (Tudo funcionando, Atenção necessária, Não pronto ou Núcleo indisponível) e, abaixo, um card para cada coisa que precisa funcionar:
 
-- localiza as bibliotecas Steam (padrão, Flatpak, `libraryfolders.vdf` e bibliotecas extras) e a instalação do Dota 2;
-- informa se o Dota 2 está aberto, pela lista de processos do sistema;
-- instala o arquivo `gamestate_integration_dota_companion.cfg` com um clique. Se já existir um arquivo diferente, pede confirmação e faz backup antes de substituir;
-- confere se o arquivo instalado usa a porta e o token atuais do aplicativo;
-- mostra o servidor GSI local, os eventos recebidos do Dota, as requisições recusadas e o horário do último evento;
-- tem o botão **Testar conexão**, que envia um evento de teste ao próprio servidor;
-- exibe o último JSON recebido (sem o token).
+- **Steam:** "Estado desconhecido" por enquanto, porque o aplicativo ainda não verifica se a Steam está aberta (issue #65);
+- **Dota 2:** em execução, não detectado (pela lista de processos do sistema) ou instalação não encontrada (o app procura nas bibliotecas Steam: padrão, Flatpak, `libraryfolders.vdf` e extras);
+- **Servidor GSI:** funcionando, iniciando ou com erro;
+- **Configuração GSI:** instalada e válida, ausente, apontando para outro endereço ou porta, com token divergente ou inválida;
+- **Recebimento de dados:** recebendo dados (último evento há até 90 s), aguardando o Dota, sem dados recentes ou conexão instável ou interrompida.
+
+Três ações, cada uma com uma explicação do que faz: **Instalar configuração GSI** (com um clique; se já existir um arquivo diferente, pede confirmação e faz backup antes de substituir), **Testar conexão** (envia um evento de teste ao próprio servidor) e **Rodar diagnóstico novamente**. O resultado das ações aparece logo abaixo dos cards.
+
+Os números técnicos (eventos recebidos e gravados, requisições recusadas, a gravação em arquivo, o caminho da configuração do aplicativo e o último JSON recebido, sem o token) ficam num bloco fechado, **Detalhes técnicos**.
 
 A barra de título mostra o estado da conexão GSI.
 
@@ -71,7 +73,7 @@ RUST_LOG=debug cargo run   # com logs detalhados
 1. Abra o aplicativo, vá em **Diagnóstico** e clique em **Instalar configuração GSI**.
 2. Na Steam: Dota 2 → Propriedades → Geral → Opções de inicialização, adicione `-gamestateintegration`.
 3. Reinicie o Dota 2 e entre em uma partida ou lobby (contra bots também funciona).
-4. O Diagnóstico passa a mostrar os eventos recebidos.
+4. O Diagnóstico passa a mostrar "Recebendo dados".
 
 ## Teste manual sem o Dota
 

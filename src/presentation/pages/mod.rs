@@ -1,11 +1,13 @@
 //! Páginas da janela principal e a lista de abas.
 
 pub mod build;
+pub mod build_cards;
+pub mod build_compare;
 pub mod build_panel;
 pub mod diagnostics;
+pub mod diagnostics_health;
 pub mod hero;
-pub mod pro;
-pub mod recommendation_page;
+pub mod timeline;
 
 use relm4::adw;
 use tokio::sync::mpsc::UnboundedSender;

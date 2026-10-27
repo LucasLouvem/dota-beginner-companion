@@ -1,6 +1,8 @@
-//! Imagens dos itens mostrados na página da build: cada uma é lida do cache
-//! no computador ou, na primeira vez, baixada e guardada. Uma imagem que
-//! falha não impede nada: o item aparece pelo nome.
+//! Imagens mostradas na página da build (itens, retrato do herói e ícones das
+//! habilidades): cada uma é lida do cache no computador ou, na primeira vez,
+//! baixada e guardada. Uma imagem que falha não impede nada: o item, o herói
+//! ou a habilidade aparece pelo nome. A chave é o nome interno
+//! (`item_blink`, `npc_dota_hero_zuus`, `zuus_arc_lightning`).
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -9,22 +11,34 @@ use tokio::task::JoinSet;
 
 use crate::application::error::{ToDiagnostic, log_warning};
 use crate::application::ports::{ItemIconError, ItemIconSource, ItemIconStore};
-use crate::application::state::RecommendationStatus;
+use crate::application::state::{AppSnapshot, RecommendationStatus};
 use crate::application::use_cases::recommendations::Recommendations;
-use crate::domain::game::GameSnapshot;
+use crate::domain::game::{GameSnapshot, HeroPick};
+use crate::domain::hero_catalog::{HeroCatalog, HeroInfo};
 use crate::domain::item_catalog::ItemCatalog;
 
-/// PNG de um item, compartilhado sem cópia entre os estados publicados.
+/// PNG de uma imagem, compartilhado sem cópia entre os estados publicados.
 pub type IconBytes = Arc<[u8]>;
-/// Imagens já carregadas, pelo nome interno do item.
+/// Imagens já carregadas, pelo nome interno.
 pub type ItemIcons = HashMap<String, IconBytes>;
 
-/// Adaptadores das imagens e o catálogo com o caminho de cada uma.
+/// Adaptadores das imagens e os catálogos com o caminho de cada uma.
 #[derive(Clone)]
 pub struct IconSources {
     pub source: Arc<dyn ItemIconSource>,
     pub store: Arc<dyn ItemIconStore>,
     pub items: Arc<ItemCatalog>,
+    pub heroes: Arc<HeroCatalog>,
+}
+
+impl IconSources {
+    /// Caminho da imagem no CDN: de item, de herói ou de habilidade.
+    fn image_path(&self, key: &str) -> Option<String> {
+        match self.items.by_name(key) {
+            Some(item) => item.image_path.clone(),
+            None => self.heroes.image_path_of(key).map(str::to_owned),
+        }
+    }
 }
 
 /// Itens das builds recomendadas: inventário, mochila, neutro,
@@ -67,6 +81,40 @@ pub fn status_items(status: &RecommendationStatus) -> BTreeSet<String> {
     }
 }
 
+/// Imagens do herói e das habilidades dele: o retrato e o ícone de cada
+/// habilidade, pelo nome interno.
+pub fn hero_images(hero: &HeroInfo) -> BTreeSet<String> {
+    std::iter::once(hero.name.clone())
+        .chain(hero.abilities.iter().map(|ability| ability.name.clone()))
+        .collect()
+}
+
+/// Imagens dos heróis que a página pode mostrar agora: o da partida atual, o
+/// da última partida e o da consulta das recomendações.
+pub fn status_hero_images(snapshot: &AppSnapshot, heroes: &HeroCatalog) -> BTreeSet<String> {
+    let status = &snapshot.match_status;
+    let named = |hero: &HeroPick| match hero {
+        HeroPick::Picked { name, id } => heroes
+            .by_name(name)
+            .or_else(|| id.and_then(|id| heroes.by_id(id))),
+        HeroPick::NotPicked => None,
+    };
+    let current = status.game.as_ref().and_then(|game| named(&game.hero));
+    let last = status
+        .last_match
+        .as_ref()
+        .and_then(|summary| named(&summary.hero));
+    let queried = match &snapshot.recommendations {
+        RecommendationStatus::Ready(ready) => heroes.by_id(ready.key.hero_id),
+        _ => None,
+    };
+    [current, last, queried]
+        .into_iter()
+        .flatten()
+        .flat_map(hero_images)
+        .collect()
+}
+
 /// Carrega as imagens dos `items`; devolve só as que foram obtidas.
 pub async fn load_icons(sources: &IconSources, items: Vec<String>) -> Vec<(String, IconBytes)> {
     let mut tasks = JoinSet::new();
@@ -89,10 +137,10 @@ pub async fn load_icons(sources: &IconSources, items: Vec<String>) -> Vec<(Strin
     loaded
 }
 
-/// Imagem de um item: do cache ou da fonte, que então é guardada. Item sem
-/// caminho de imagem no catálogo fica sem imagem.
+/// Imagem pela chave: do cache ou da fonte, que então é guardada. Chave sem
+/// caminho de imagem nos catálogos fica sem imagem.
 pub async fn load_icon(sources: &IconSources, item: &str) -> Option<IconBytes> {
-    let image_path = sources.items.by_name(item)?.image_path.clone()?;
+    let image_path = sources.image_path(item)?;
     let store = Arc::clone(&sources.store);
     let name = item.to_owned();
     match blocking(move || store.load(&name)).await {

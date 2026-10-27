@@ -9,11 +9,15 @@ use relm4::gtk::{self, gdk, glib, prelude::*};
 use crate::application::use_cases::item_icons::ItemIcons;
 use crate::domain::build_progress::StepState;
 
+use super::i18n::{translate, translate_with};
 use super::pages::build::{AbilityGrid, ItemChip, purchase_time};
+use super::pages::build_compare::{CompareRow, Comparison, Verdict};
 use super::widgets::{RowChange, list_changes};
 
 /// Lado da imagem do item, em pixels.
-const ICON_SIZE: i32 = 40;
+const ICON_SIZE: i32 = 32;
+/// Lado do ícone da habilidade na grade, em pixels.
+const ABILITY_ICON_SIZE: i32 = 22;
 
 /// Texturas das imagens dos itens, criadas uma vez por item a partir dos
 /// bytes publicados no estado.
@@ -55,16 +59,17 @@ impl ChipWidget {
         let image = gtk::Image::builder().pixel_size(icon_size).build();
         let name = gtk::Label::builder()
             .wrap(true)
-            .max_width_chars(10)
+            .max_width_chars(9)
             .justify(gtk::Justification::Center)
             .build();
+        name.add_css_class("caption");
         let caption = gtk::Label::new(None);
         caption.add_css_class("caption");
-        let frame = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        frame.set_margin_top(4);
-        frame.set_margin_bottom(4);
-        frame.set_margin_start(4);
-        frame.set_margin_end(4);
+        let frame = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        frame.set_margin_top(2);
+        frame.set_margin_bottom(2);
+        frame.set_margin_start(2);
+        frame.set_margin_end(2);
         frame.append(&image);
         frame.append(&name);
         frame.append(&caption);
@@ -84,14 +89,11 @@ impl ChipWidget {
             Some(texture) => {
                 self.image.set_paintable(Some(texture));
                 self.image.set_visible(true);
-                self.name.set_visible(false);
             }
-            None => {
-                self.image.set_visible(false);
-                self.name.set_label(&chip.label);
-                self.name.set_visible(true);
-            }
+            None => self.image.set_visible(false),
         }
+        self.name.set_label(&chip.label);
+        self.name.set_visible(true);
         self.caption.set_label(&chip_caption(chip));
         self.caption.set_visible(!self.caption.label().is_empty());
         for (class, active) in [
@@ -105,10 +107,18 @@ impl ChipWidget {
                 self.caption.remove_css_class(class);
             }
         }
-        if chip.state == Some(StepState::Next) {
-            self.frame.add_css_class("card");
-        } else {
-            self.frame.remove_css_class("card");
+        // O item comprado e o próximo têm também o símbolo e o texto, para
+        // não depender só da cor ou da opacidade.
+        for (class, active) in [
+            ("dota-chip-done", chip.state == Some(StepState::Done)),
+            ("dota-chip-next", chip.state == Some(StepState::Next)),
+            ("dota-chip-pending", chip.state == Some(StepState::Pending)),
+        ] {
+            if active {
+                self.frame.add_css_class(class);
+            } else {
+                self.frame.remove_css_class(class);
+            }
         }
         let label = chip.accessible_label();
         self.child.set_tooltip_text(Some(&label));
@@ -120,7 +130,12 @@ impl ChipWidget {
 /// Texto embaixo da imagem: o símbolo da situação e o minuto da compra.
 pub fn chip_caption(chip: &ItemChip) -> String {
     let time = chip.time.map(purchase_time).unwrap_or_default();
-    [chip.marker(), time.as_str()]
+    let next = if chip.state == Some(StepState::Next) {
+        translate("próximo")
+    } else {
+        String::new()
+    };
+    [chip.marker(), next.as_str(), time.as_str()]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -137,17 +152,18 @@ pub struct ItemStrip {
 }
 
 impl ItemStrip {
+    /// Faixa com o nome do item embaixo de cada imagem.
     pub fn new() -> Self {
-        Self::with_icon_size(ICON_SIZE)
+        Self::build(ICON_SIZE)
     }
 
-    pub fn with_icon_size(icon_size: i32) -> Self {
+    fn build(icon_size: i32) -> Self {
         let flow = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(false)
             .max_children_per_line(30)
-            .row_spacing(4)
-            .column_spacing(4)
+            .row_spacing(2)
+            .column_spacing(2)
             .build();
         Self {
             flow,
@@ -202,6 +218,155 @@ impl Default for ItemStrip {
     }
 }
 
+/// Tabela "você × build": uma linha por métrica, com o seu valor, o da build
+/// e a diferença. As linhas são criadas uma vez; depois só o texto e o estilo
+/// do resultado mudam.
+pub struct CompareView {
+    root: gtk::Box,
+    grid: gtk::Grid,
+    rows: Vec<CompareRowWidget>,
+    note: gtk::Label,
+    shown: Option<Comparison>,
+}
+
+struct CompareRowWidget {
+    label: gtk::Label,
+    you: gtk::Label,
+    build: gtk::Label,
+    verdict: gtk::Label,
+}
+
+impl CompareView {
+    pub fn new() -> Self {
+        let grid = gtk::Grid::builder()
+            .row_spacing(2)
+            .column_spacing(10)
+            .build();
+        for (column, title) in [
+            translate("Métrica"),
+            translate("Você"),
+            translate("Build"),
+            translate("Diferença"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let header = gtk::Label::builder().label(&title).xalign(0.0).build();
+            header.add_css_class("dim-label");
+            header.add_css_class("caption-heading");
+            grid.attach(&header, column as i32, 0, 1, 1);
+        }
+        let note = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .max_width_chars(36)
+            .build();
+        note.add_css_class("dim-label");
+        note.add_css_class("caption");
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        root.append(&grid);
+        root.append(&note);
+        Self {
+            root,
+            grid,
+            rows: Vec::new(),
+            note,
+            shown: None,
+        }
+    }
+
+    pub fn widget(&self) -> &gtk::Box {
+        &self.root
+    }
+
+    fn new_row(&mut self, index: usize) {
+        let make = |xalign: f32| gtk::Label::builder().xalign(xalign).wrap(true).build();
+        let row = CompareRowWidget {
+            label: make(0.0),
+            you: make(0.0),
+            build: make(0.0),
+            verdict: make(0.0),
+        };
+        for (column, label) in [&row.label, &row.you, &row.build, &row.verdict]
+            .into_iter()
+            .enumerate()
+        {
+            self.grid
+                .attach(label, column as i32, index as i32 + 1, 1, 1);
+        }
+        row.you.add_css_class("dota-stat-value");
+        row.build.add_css_class("dota-stat-value");
+        self.rows.push(row);
+    }
+
+    fn fill(widget: &CompareRowWidget, row: &CompareRow) {
+        widget.label.set_label(&row.label);
+        widget.you.set_label(&row.you);
+        widget.build.set_label(&row.build);
+        let verdict = [row.verdict.label(), row.diff.clone()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        widget.verdict.set_label(&verdict);
+        for (class, active) in [
+            ("success", row.verdict == Verdict::Ahead),
+            ("warning", row.verdict == Verdict::Behind),
+            (
+                "dim-label",
+                matches!(row.verdict, Verdict::Even | Verdict::Unknown),
+            ),
+        ] {
+            if active {
+                widget.verdict.add_css_class(class);
+            } else {
+                widget.verdict.remove_css_class(class);
+            }
+        }
+        widget
+            .label
+            .update_property(&[gtk::accessible::Property::Description(&translate_with(
+                "Você {}, build {}, {}",
+                &[&row.you, &row.build, &verdict],
+            ))]);
+    }
+
+    /// Mostra a comparação, mexendo só no que mudou; `None` esconde a tabela.
+    pub fn show(&mut self, comparison: Option<&Comparison>) {
+        if self.shown.as_ref() == comparison {
+            return;
+        }
+        let Some(comparison) = comparison else {
+            self.root.set_visible(false);
+            self.shown = None;
+            return;
+        };
+        self.root.set_visible(true);
+        while self.rows.len() < comparison.rows.len() {
+            self.new_row(self.rows.len());
+        }
+        for (index, (widget, row)) in self.rows.iter().zip(&comparison.rows).enumerate() {
+            let unchanged = self
+                .shown
+                .as_ref()
+                .and_then(|shown| shown.rows.get(index))
+                .is_some_and(|shown| shown == row);
+            if !unchanged {
+                Self::fill(widget, row);
+            }
+        }
+        self.note.set_label(&comparison.note);
+        self.note.set_visible(!comparison.note.is_empty());
+        self.shown = Some(comparison.clone());
+    }
+}
+
+impl Default for CompareView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Texto de cada célula da grade: em cada coluna (ponto), só a linha da
 /// habilidade evoluída tem marca.
 pub fn grid_cells(grid: &AbilityGrid) -> Vec<Vec<&'static str>> {
@@ -223,36 +388,38 @@ pub fn grid_cells(grid: &AbilityGrid) -> Vec<Vec<&'static str>> {
 /// classes trocados.
 pub struct AbilityGridView {
     root: gtk::Box,
-    max_order: gtk::Label,
     grid: gtk::Grid,
     /// Células por linha e coluna, sem a linha de cabeçalho e a coluna de
     /// nomes.
     cells: Vec<Vec<gtk::Label>>,
     shape: (Vec<String>, usize),
     shown: Option<AbilityGrid>,
+    /// Imagem de cada linha (escondida até a textura chegar) e a textura
+    /// que ela mostra.
+    images: Vec<gtk::Image>,
+    shown_textures: Vec<Option<gdk::Texture>>,
 }
 
 impl AbilityGridView {
     pub fn new() -> Self {
-        let max_order = gtk::Label::builder().xalign(0.0).wrap(true).build();
         let grid = gtk::Grid::builder()
-            .row_spacing(4)
-            .column_spacing(6)
+            .row_spacing(2)
+            .column_spacing(4)
             .build();
         let scroll = gtk::ScrolledWindow::builder()
             .vscrollbar_policy(gtk::PolicyType::Never)
             .child(&grid)
             .build();
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        root.append(&max_order);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
         root.append(&scroll);
         Self {
             root,
-            max_order,
             grid,
             cells: Vec::new(),
             shape: (Vec::new(), 0),
             shown: None,
+            images: Vec::new(),
+            shown_textures: Vec::new(),
         }
     }
 
@@ -260,13 +427,29 @@ impl AbilityGridView {
         &self.root
     }
 
-    pub fn show(&mut self, grid: Option<&AbilityGrid>) {
-        if self.shown.as_ref() == grid {
+    /// Mostra a grade. As imagens das habilidades podem chegar depois do
+    /// texto, então a grade também confere se alguma textura mudou.
+    pub fn show(
+        &mut self,
+        grid: Option<&AbilityGrid>,
+        icons: &ItemIcons,
+        textures: &mut IconTextures,
+    ) {
+        let wanted: Vec<Option<gdk::Texture>> = grid
+            .map(|grid| {
+                grid.images
+                    .iter()
+                    .map(|image| image.as_deref().and_then(|key| textures.get(key, icons)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if self.shown.as_ref() == grid && self.shown_textures == wanted {
             return;
         }
         let Some(grid) = grid else {
             self.root.set_visible(false);
             self.shown = None;
+            self.shown_textures.clear();
             return;
         };
         self.root.set_visible(true);
@@ -275,11 +458,11 @@ impl AbilityGridView {
             self.rebuild(&shape);
             self.shape = shape;
         }
-        self.max_order
-            .set_label(&crate::presentation::i18n::translate_with(
-                "Ordem em que cada habilidade recebeu o último ponto nesta partida: {}",
-                &[&grid.max_order],
-            ));
+        for (image, texture) in self.images.iter().zip(&wanted) {
+            image.set_paintable(texture.as_ref());
+            image.set_visible(texture.is_some());
+        }
+        self.shown_textures = wanted;
         self.grid
             .update_property(&[gtk::accessible::Property::Description(&grid.summary)]);
         let states: Vec<Option<StepState>> = (0..grid.points.len())
@@ -318,12 +501,19 @@ impl AbilityGridView {
             header.add_css_class("caption");
             self.grid.attach(&header, column as i32 + 1, 0, 1, 1);
         }
+        self.images.clear();
         self.cells = rows
             .iter()
             .enumerate()
             .map(|(row, name)| {
                 let label = gtk::Label::builder().label(name).xalign(0.0).build();
-                self.grid.attach(&label, 0, row as i32 + 1, 1, 1);
+                let image = gtk::Image::builder().pixel_size(ABILITY_ICON_SIZE).build();
+                image.set_visible(false);
+                let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                header.append(&image);
+                header.append(&label);
+                self.images.push(image);
+                self.grid.attach(&header, 0, row as i32 + 1, 1, 1);
                 (0..*columns)
                     .map(|column| {
                         let cell = gtk::Label::new(None);

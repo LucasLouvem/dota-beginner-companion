@@ -67,6 +67,38 @@ pub struct PublicMatchSummary {
     pub start_time: Option<i64>,
 }
 
+/// Abates, mortes e assistências de um jogador numa partida. Só existe com
+/// os três números.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Kda {
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+}
+
+/// Totais finais de um jogador numa partida. Cada número só existe quando a
+/// fonte o informa (os de observers e sentries, por exemplo, só vêm em
+/// partida analisada).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FinalStats {
+    pub last_hits: Option<u32>,
+    pub denies: Option<u32>,
+    /// Ouro por minuto, média da partida inteira.
+    pub gpm: Option<u32>,
+    /// Experiência por minuto, média da partida inteira.
+    pub xpm: Option<u32>,
+    pub net_worth: Option<u32>,
+    pub observers_placed: Option<u32>,
+    pub sentries_placed: Option<u32>,
+}
+
+impl FinalStats {
+    /// Nenhum número informado.
+    pub fn is_empty(&self) -> bool {
+        *self == FinalStats::default()
+    }
+}
+
 /// Partida recente com um herói, da lista de candidatas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeroMatch {
@@ -79,6 +111,8 @@ pub struct HeroMatch {
     /// Se o time do herói venceu.
     pub hero_won: Option<bool>,
     pub duration_secs: Option<u32>,
+    /// Resultado do jogador com o herói na partida.
+    pub kda: Option<Kda>,
 }
 
 impl HeroMatch {
@@ -131,6 +165,8 @@ pub struct MatchPlayer {
     pub build: Option<PlayerBuild>,
     /// IDs das habilidades na ordem em que foram evoluídas.
     pub ability_upgrades: Option<Vec<u32>>,
+    pub kda: Option<Kda>,
+    pub stats: FinalStats,
 }
 
 #[cfg(test)]

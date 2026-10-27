@@ -5,6 +5,7 @@ use super::*;
 use crate::application::ports::BoxFuture;
 use crate::domain::game::CarriedItem;
 use crate::domain::game::GameMode;
+use crate::domain::hero_catalog::{AbilityInfo, AttackType, PrimaryAttribute};
 use crate::domain::item_catalog::ItemInfo;
 use crate::test_support::{pro_builds, pro_win, public_win, recommendations, zeus_build};
 use std::sync::Mutex;
@@ -81,12 +82,100 @@ fn catalog() -> Arc<ItemCatalog> {
     ]))
 }
 
+fn heroes() -> Arc<HeroCatalog> {
+    Arc::new(HeroCatalog::new(vec![HeroInfo {
+        image_path: Some("/heroes/zuus.png".into()),
+        id: 22,
+        name: "npc_dota_hero_zuus".into(),
+        display_name: "Zeus".into(),
+        primary_attribute: PrimaryAttribute::Intelligence,
+        attack_type: AttackType::Ranged,
+        roles: vec![],
+        abilities: vec![
+            AbilityInfo {
+                image_path: Some("/abilities/zuus_arc_lightning.png".into()),
+                name: "zuus_arc_lightning".into(),
+                display_name: "Arc Lightning".into(),
+            },
+            AbilityInfo {
+                image_path: None,
+                name: "zuus_no_image".into(),
+                display_name: "Sem imagem".into(),
+            },
+        ],
+    }]))
+}
+
 fn sources(source: Arc<FakeSource>, store: Arc<MemoryStore>) -> IconSources {
     IconSources {
         source,
         store,
         items: catalog(),
+        heroes: heroes(),
     }
+}
+
+#[tokio::test]
+async fn hero_and_ability_images_use_the_same_cache_and_download() {
+    let source = Arc::new(FakeSource::default());
+    let store = Arc::new(MemoryStore::default());
+    let sources = sources(Arc::clone(&source), Arc::clone(&store));
+
+    let hero = load_icon(&sources, "npc_dota_hero_zuus").await.unwrap();
+    let ability = load_icon(&sources, "zuus_arc_lightning").await.unwrap();
+    let again = load_icon(&sources, "npc_dota_hero_zuus").await.unwrap();
+
+    assert_eq!(&*hero, b"png:/heroes/zuus.png");
+    assert_eq!(&*ability, b"png:/abilities/zuus_arc_lightning.png");
+    assert_eq!(hero, again);
+    assert_eq!(
+        source.fetches.load(Ordering::SeqCst),
+        2,
+        "o herói vem do cache na segunda vez"
+    );
+    assert!(
+        store
+            .saved
+            .lock()
+            .unwrap()
+            .contains_key("zuus_arc_lightning")
+    );
+}
+
+#[tokio::test]
+async fn ability_or_hero_without_image_path_or_unknown_stays_without_image() {
+    let source = Arc::new(FakeSource::default());
+    let sources = sources(Arc::clone(&source), Arc::new(MemoryStore::default()));
+
+    assert!(load_icon(&sources, "zuus_no_image").await.is_none());
+    assert!(load_icon(&sources, "npc_dota_hero_unknown").await.is_none());
+    assert_eq!(source.fetches.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn hero_images_are_the_portrait_and_each_ability() {
+    let heroes = heroes();
+    let hero = heroes.by_id(22).unwrap();
+    assert_eq!(
+        hero_images(hero).into_iter().collect::<Vec<_>>(),
+        ["npc_dota_hero_zuus", "zuus_arc_lightning", "zuus_no_image"]
+    );
+}
+
+#[test]
+fn status_images_cover_the_current_hero_and_nothing_without_a_hero() {
+    let heroes = heroes();
+    let mut snapshot = AppSnapshot::default();
+    assert!(status_hero_images(&snapshot, &heroes).is_empty());
+
+    snapshot.match_status.game = Some(GameSnapshot {
+        hero: HeroPick::Picked {
+            name: "npc_dota_hero_zuus".into(),
+            id: Some(22),
+        },
+        ..GameSnapshot::menu()
+    });
+    assert!(status_hero_images(&snapshot, &heroes).contains("npc_dota_hero_zuus"));
 }
 
 #[tokio::test]

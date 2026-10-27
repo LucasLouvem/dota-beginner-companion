@@ -56,3 +56,22 @@ fn fails_with_typed_error_when_data_is_not_a_hero_list() {
         UiText::new("Dados dos heróis indisponíveis")
     );
 }
+
+#[test]
+fn embedded_zeus_and_his_ability_have_image_paths() {
+    let catalog = embedded_catalog().unwrap();
+    let zeus = catalog.by_name("npc_dota_hero_zuus").unwrap();
+    assert_eq!(
+        zeus.image_path.as_deref(),
+        Some("/apps/dota2/images/dota_react/heroes/zuus.png")
+    );
+    assert_eq!(
+        catalog.image_path_of("zuus_arc_lightning"),
+        Some("/apps/dota2/images/dota_react/abilities/zuus_arc_lightning.png")
+    );
+    assert_eq!(
+        catalog.image_path_of("npc_dota_hero_zuus"),
+        zeus.image_path.as_deref()
+    );
+    assert_eq!(catalog.image_path_of("not_an_ability"), None);
+}
